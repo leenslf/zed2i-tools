@@ -6,6 +6,7 @@
 #include <iomanip>
 #include <sstream>
 #include <type_traits>
+#include <vector>
 
 #include "Logger.hpp"
 #include "Validator.hpp"
@@ -141,6 +142,8 @@ bool DataRecorder::startSession() {
     grab_count_ = 0;
     recorded_frame_count_ = 0;
     progress_tick_ = 0;
+    warned_bad_odometry_ = false;
+    warned_bad_pointcloud_ = false;
     start_time_ = std::chrono::steady_clock::now();
     recording_.store(true, std::memory_order_relaxed);
 
@@ -238,7 +241,10 @@ bool DataRecorder::writeOdometry(const OdometryData& odometry, sl::Timestamp tim
         return false;
     }
     if (odometry.tracking_state != sl::POSITIONAL_TRACKING_STATE::OK) {
-        Logger::log(LogLevel::Warn, "Skipping odometry sample with bad tracking state.");
+        if (!warned_bad_odometry_) {
+            Logger::log(LogLevel::Warn, "Skipping odometry sample with bad tracking state.");
+            warned_bad_odometry_ = true;
+        }
         return false;
     }
 
@@ -263,11 +269,11 @@ bool DataRecorder::writePointCloud(PointCloudData& cloud, std::size_t frame_inde
         return false;
     }
 
-    sl::float4 point;
-    cloud.cloud.getValue(0, 0, &point);
-    const auto sample = PointSample{point.x, point.y, point.z, point.w};
-    if (!Validator::validatePointCloudSamples({sample})) {
-        Logger::log(LogLevel::Warn, "Skipping invalid point cloud sample.");
+    if (!hasValidPointSample(cloud.cloud)) {
+        if (!warned_bad_pointcloud_) {
+            Logger::log(LogLevel::Warn, "Skipping invalid point cloud sample.");
+            warned_bad_pointcloud_ = true;
+        }
         return false;
     }
 
@@ -300,6 +306,32 @@ bool DataRecorder::writePointCloudPly(const sl::Mat& cloud, const std::filesyste
         }
     }
     return true;
+}
+
+bool DataRecorder::hasValidPointSample(const sl::Mat& cloud) const {
+    const int width = cloud.getWidth();
+    const int height = cloud.getHeight();
+    if (width <= 0 || height <= 0) {
+        return false;
+    }
+
+    const int stride_x = std::max(1, width / 8);
+    const int stride_y = std::max(1, height / 8);
+
+    sl::float4 point;
+    std::vector<PointSample> samples;
+    samples.reserve(8);
+    for (int y = 0; y < height; y += stride_y) {
+        for (int x = 0; x < width; x += stride_x) {
+            cloud.getValue(x, y, &point);
+            samples.push_back(PointSample{point.x, point.y, point.z, point.w});
+            if (samples.size() >= 8) {
+                return Validator::validatePointCloudSamples(samples);
+            }
+        }
+    }
+
+    return Validator::validatePointCloudSamples(samples);
 }
 
 std::filesystem::path DataRecorder::buildSessionPath() const {

@@ -40,6 +40,7 @@ private:
     bool writePointCloud(PointCloudData& cloud, std::size_t frame_index);
 
     bool writePointCloudPly(const sl::Mat& cloud, const std::filesystem::path& path) const;
+    bool hasValidPointSample(const sl::Mat& cloud) const;
 
     std::filesystem::path buildSessionPath() const;
     std::string formatTimestamp(sl::Timestamp timestamp) const;
@@ -60,6 +61,8 @@ private:
     std::size_t grab_count_ = 0;
     std::size_t recorded_frame_count_ = 0;
     std::size_t progress_tick_ = 0;
+    bool warned_bad_odometry_ = false;
+    bool warned_bad_pointcloud_ = false;
 };
 
 } // namespace zedapp

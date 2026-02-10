@@ -1,5 +1,6 @@
 #include "DataRetriever.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <sstream>
 
@@ -75,9 +76,28 @@ ImuSample DataRetriever::toImuSample(const sl::SensorsData::IMUData& imu) const 
 
 std::vector<PointSample> DataRetriever::samplePointCloud(const sl::Mat& cloud) const {
     std::vector<PointSample> samples;
+    const int width = cloud.getWidth();
+    const int height = cloud.getHeight();
+    if (width <= 0 || height <= 0) {
+        return samples;
+    }
+
+    const int stride_x = std::max(1, width / 8);
+    const int stride_y = std::max(1, height / 8);
+
     sl::float4 point;
-    cloud.getValue(0, 0, &point);
-    samples.push_back(PointSample{point.x, point.y, point.z, point.w});
+    for (int y = 0; y < height; y += stride_y) {
+        for (int x = 0; x < width; x += stride_x) {
+            cloud.getValue(x, y, &point);
+            const PointSample sample{point.x, point.y, point.z, point.w};
+            if (std::isfinite(sample.x) && std::isfinite(sample.y) && std::isfinite(sample.z)) {
+                samples.push_back(sample);
+                if (samples.size() >= 8) {
+                    return samples;
+                }
+            }
+        }
+    }
 
     return samples;
 }
