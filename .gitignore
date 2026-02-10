@@ -1,2 +1,4 @@
 build/
 recordings/
+.venv/
+analysis/results/

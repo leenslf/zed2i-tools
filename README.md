@@ -88,6 +88,22 @@ Set `ZED_TEST_LIVE=1` to enable the live camera integration test:
 ZED_TEST_LIVE=1 ctest --test-dir build -R Integration
 ```
 
+## Analysis (Python)
+The recording analysis script lives in `analysis/scripts/analyze_recording.py` and writes results to `analysis/results/<recording_name>/`.
+
+### Setup (venv)
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install pandas numpy matplotlib
+```
+
+### Run analysis
+```bash
+python analysis/scripts/analyze_recording.py recordings/<recording_name>/
+```
+
 ## Notes
 - `--serial` is parsed but not applied yet. Add the SDK call to select a specific camera serial after verifying the current API.
 - If `find_package(ZED)` fails, set `ZED_SDK_ROOT_DIR` or adjust the CMake logic to match your SDK installation.
