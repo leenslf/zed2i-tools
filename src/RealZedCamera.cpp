@@ -30,6 +30,18 @@ sl::ERROR_CODE RealZedCamera::getSensorsData(sl::SensorsData& data, sl::TIME_REF
     return camera_.getSensorsData(data, reference);
 }
 
+sl::Timestamp RealZedCamera::getTimestamp(sl::TIME_REFERENCE reference) {
+    return camera_.getTimestamp(reference);
+}
+
+sl::ERROR_CODE RealZedCamera::enableRecording(const sl::RecordingParameters& params) {
+    return camera_.enableRecording(params);
+}
+
+void RealZedCamera::disableRecording() {
+    camera_.disableRecording();
+}
+
 sl::ERROR_CODE RealZedCamera::enablePositionalTracking(const sl::PositionalTrackingParameters& params) {
     return camera_.enablePositionalTracking(params);
 }

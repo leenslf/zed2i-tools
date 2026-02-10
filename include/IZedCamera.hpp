@@ -17,6 +17,9 @@ public:
     virtual sl::ERROR_CODE retrieveMeasure(sl::Mat& measure, sl::MEASURE measure_type) = 0;
 
     virtual sl::ERROR_CODE getSensorsData(sl::SensorsData& data, sl::TIME_REFERENCE reference) = 0;
+    virtual sl::Timestamp getTimestamp(sl::TIME_REFERENCE reference) = 0;
+    virtual sl::ERROR_CODE enableRecording(const sl::RecordingParameters& params) = 0;
+    virtual void disableRecording() = 0;
     virtual sl::ERROR_CODE enablePositionalTracking(const sl::PositionalTrackingParameters& params) = 0;
     virtual void disablePositionalTracking() = 0;
     virtual sl::POSITIONAL_TRACKING_STATE getPosition(sl::Pose& pose, sl::REFERENCE_FRAME reference) = 0;

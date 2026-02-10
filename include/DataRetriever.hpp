@@ -31,6 +31,7 @@ struct PointCloudData {
 };
 
 struct DataSnapshot {
+    sl::Timestamp timestamp;
     std::optional<FrameData> frames;
     std::optional<ImuData> imu;
     std::optional<OdometryData> odometry;

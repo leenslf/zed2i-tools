@@ -17,6 +17,7 @@ sl::ERROR_CODE DataRetriever::retrieve(DataSnapshot& out_snapshot) {
     }
 
     out_snapshot = DataSnapshot{};
+    out_snapshot.timestamp = camera_.getTimestamp(sl::TIME_REFERENCE::IMAGE);
 
     if (config_.enable_frames) {
         const auto left_status = camera_.retrieveImage(left_, sl::VIEW::LEFT);

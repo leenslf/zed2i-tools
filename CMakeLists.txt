@@ -28,6 +28,7 @@ endif()
 add_library(zed_app_core
     src/CameraManager.cpp
     src/Config.cpp
+    src/DataRecorder.cpp
     src/DataRetriever.cpp
     src/Logger.cpp
     src/RealZedCamera.cpp
@@ -68,6 +69,7 @@ endif()
 
 add_executable(zed_app_tests
     tests/test_config.cpp
+    tests/test_data_recorder.cpp
     tests/test_validator.cpp
     tests/test_data_retriever.cpp
     tests/test_integration_pipeline.cpp

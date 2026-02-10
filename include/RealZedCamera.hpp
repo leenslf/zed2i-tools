@@ -18,6 +18,9 @@ public:
     sl::ERROR_CODE retrieveMeasure(sl::Mat& measure, sl::MEASURE measure_type) override;
 
     sl::ERROR_CODE getSensorsData(sl::SensorsData& data, sl::TIME_REFERENCE reference) override;
+    sl::Timestamp getTimestamp(sl::TIME_REFERENCE reference) override;
+    sl::ERROR_CODE enableRecording(const sl::RecordingParameters& params) override;
+    void disableRecording() override;
     sl::ERROR_CODE enablePositionalTracking(const sl::PositionalTrackingParameters& params) override;
     void disablePositionalTracking() override;
     sl::POSITIONAL_TRACKING_STATE getPosition(sl::Pose& pose, sl::REFERENCE_FRAME reference) override;

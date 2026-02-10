@@ -51,12 +51,27 @@ cmake --build build -j
 ./build/zed_app --config config/example.conf --iterations=200
 ```
 
+### Recording output
+When recording is enabled, the app writes to `recordings/YYYY-MM-DD_HH-MM-SS/` with:
+- `images/` left/right frame images
+- `imu.csv`
+- `odometry.csv`
+- `pointclouds/` (`.ply` per frame or a single `pointcloud.svo` when SVO recording is enabled)
+
 ### Command-line flags
 - `--config <path>` load a config file
 - `--enable-frames` / `--disable-frames`
 - `--enable-imu` / `--disable-imu`
 - `--enable-odometry` / `--disable-odometry`
 - `--enable-point-cloud` / `--disable-point-cloud`
+- `--record` / `--no-record` start or disable recording
+- `--record-toggle` enable keyboard toggling (`r` to toggle, `q` to quit)
+- `--record-duration=<seconds>` stop after N seconds
+- `--record-frames=<N>` stop after N recorded frames
+- `--record-stride=<N>` record every Nth frame
+- `--record-image-format=png|jpg`
+- `--record-pointcloud-format=ply|svo`
+- `--record-root=<path>` output root folder (default `recordings`)
 - `--depth-mode=PERFORMANCE|QUALITY|ULTRA|NEURAL`
 - `--serial=<serial>`
 - `--iterations=<N>` run N loops, 0 for infinite (default)

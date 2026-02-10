@@ -1,9 +1,12 @@
 #include <chrono>
 #include <csignal>
+#include <atomic>
+#include <cctype>
 #include <thread>
 
 #include "CameraManager.hpp"
 #include "Config.hpp"
+#include "DataRecorder.hpp"
 #include "DataRetriever.hpp"
 #include "Logger.hpp"
 
@@ -60,10 +63,37 @@ int main(int argc, char** argv) {
     }
 
     DataRetriever retriever(*camera, config);
+    DataRecorder recorder(config, camera.get());
 
     const int iterations = parseIterations(argc, argv);
     const int sleep_ms = parseSleepMs(argc, argv);
     int count = 0;
+
+    std::atomic<bool> recording_enabled{config.enable_recording};
+    if (recording_enabled.load()) {
+        recorder.setEnabled(true);
+    }
+
+    std::thread input_thread;
+    if (config.recording_keyboard_toggle) {
+        input_thread = std::thread([&]() {
+            std::string line;
+            while (g_running && std::getline(std::cin, line)) {
+                if (line.empty()) {
+                    continue;
+                }
+                const char command =
+                    static_cast<char>(std::tolower(static_cast<unsigned char>(line.front())));
+                if (command == 'r') {
+                    recording_enabled.store(!recording_enabled.load());
+                    recorder.setEnabled(recording_enabled.load());
+                } else if (command == 'q') {
+                    g_running = 0;
+                }
+            }
+        });
+        input_thread.detach();
+    }
 
     while (g_running) {
         DataSnapshot snapshot;
@@ -72,12 +102,18 @@ int main(int argc, char** argv) {
             Logger::log(LogLevel::Warn, "Grab failed, retrying.");
         }
 
+        if (status == sl::ERROR_CODE::SUCCESS && recording_enabled.load()) {
+            recorder.handleSnapshot(snapshot);
+        }
+
         if (iterations > 0 && ++count >= iterations) {
             break;
         }
 
         std::this_thread::sleep_for(std::chrono::milliseconds(sleep_ms));
     }
+
+    recorder.setEnabled(false);
 
     if (config.enable_odometry) {
         camera->disablePositionalTracking();

@@ -26,6 +26,15 @@ public:
         return sensors_result;
     }
 
+    sl::Timestamp getTimestamp(sl::TIME_REFERENCE) override { return timestamp; }
+
+    sl::ERROR_CODE enableRecording(const sl::RecordingParameters&) override {
+        recording_enabled = true;
+        return recording_result;
+    }
+
+    void disableRecording() override { recording_enabled = false; }
+
     sl::ERROR_CODE enablePositionalTracking(const sl::PositionalTrackingParameters&) override {
         tracking_enabled = true;
         return tracking_result;
@@ -40,6 +49,7 @@ public:
 
     bool opened = false;
     bool tracking_enabled = false;
+    bool recording_enabled = false;
 
     sl::ERROR_CODE open_result = sl::ERROR_CODE::SUCCESS;
     sl::ERROR_CODE grab_result = sl::ERROR_CODE::SUCCESS;
@@ -47,10 +57,12 @@ public:
     sl::ERROR_CODE measure_result = sl::ERROR_CODE::SUCCESS;
     sl::ERROR_CODE sensors_result = sl::ERROR_CODE::SUCCESS;
     sl::ERROR_CODE tracking_result = sl::ERROR_CODE::SUCCESS;
+    sl::ERROR_CODE recording_result = sl::ERROR_CODE::SUCCESS;
 
     sl::POSITIONAL_TRACKING_STATE tracking_state = sl::POSITIONAL_TRACKING_STATE::OK;
     sl::SensorsData sensors_data{};
     sl::Pose pose_data{};
+    sl::Timestamp timestamp{};
 };
 
 } // namespace zedapp

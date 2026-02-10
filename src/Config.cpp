@@ -50,6 +50,28 @@ DepthMode parseDepthMode(const std::string& value) {
     throw std::runtime_error("Unknown depth mode: " + value);
 }
 
+ImageFormat parseImageFormat(const std::string& value) {
+    const auto lower = toLower(trim(value));
+    if (lower == "png") {
+        return ImageFormat::Png;
+    }
+    if (lower == "jpg" || lower == "jpeg") {
+        return ImageFormat::Jpg;
+    }
+    throw std::runtime_error("Unknown image format: " + value);
+}
+
+PointCloudFormat parsePointCloudFormat(const std::string& value) {
+    const auto lower = toLower(trim(value));
+    if (lower == "ply") {
+        return PointCloudFormat::Ply;
+    }
+    if (lower == "svo") {
+        return PointCloudFormat::Svo;
+    }
+    throw std::runtime_error("Unknown point cloud format: " + value);
+}
+
 } // namespace
 
 Config Config::fromFile(const std::string& path) {
@@ -81,6 +103,22 @@ Config Config::fromFile(const std::string& path) {
             config.enable_odometry = parseBool(value);
         } else if (key == "enable_point_cloud") {
             config.enable_point_cloud = parseBool(value);
+        } else if (key == "enable_recording") {
+            config.enable_recording = parseBool(value);
+        } else if (key == "recording_duration_sec") {
+            config.recording_duration_sec = std::stoi(value);
+        } else if (key == "recording_frame_limit") {
+            config.recording_frame_limit = std::stoi(value);
+        } else if (key == "recording_frame_stride") {
+            config.recording_frame_stride = std::stoi(value);
+        } else if (key == "recording_image_format") {
+            config.recording_image_format = parseImageFormat(value);
+        } else if (key == "recording_point_cloud_format") {
+            config.recording_point_cloud_format = parsePointCloudFormat(value);
+        } else if (key == "recording_root") {
+            config.recording_root = value;
+        } else if (key == "recording_keyboard_toggle") {
+            config.recording_keyboard_toggle = parseBool(value);
         } else if (key == "depth_mode") {
             config.depth_mode = parseDepthMode(value);
         } else if (key == "serial_number") {
@@ -125,6 +163,26 @@ ConfigOverrides ConfigOverrides::fromArgs(int argc, char** argv) {
             overrides.enable_point_cloud = true;
         } else if (arg == "--disable-point-cloud") {
             overrides.enable_point_cloud = false;
+        } else if (arg == "--record") {
+            overrides.enable_recording = true;
+        } else if (arg == "--no-record") {
+            overrides.enable_recording = false;
+        } else if (arg == "--record-toggle") {
+            overrides.recording_keyboard_toggle = true;
+        } else if (arg.rfind("--record-duration=", 0) == 0) {
+            overrides.recording_duration_sec = std::stoi(arg.substr(std::string("--record-duration=").size()));
+        } else if (arg.rfind("--record-frames=", 0) == 0) {
+            overrides.recording_frame_limit = std::stoi(arg.substr(std::string("--record-frames=").size()));
+        } else if (arg.rfind("--record-stride=", 0) == 0) {
+            overrides.recording_frame_stride = std::stoi(arg.substr(std::string("--record-stride=").size()));
+        } else if (arg.rfind("--record-image-format=", 0) == 0) {
+            overrides.recording_image_format =
+                parseImageFormat(arg.substr(std::string("--record-image-format=").size()));
+        } else if (arg.rfind("--record-pointcloud-format=", 0) == 0) {
+            overrides.recording_point_cloud_format =
+                parsePointCloudFormat(arg.substr(std::string("--record-pointcloud-format=").size()));
+        } else if (arg.rfind("--record-root=", 0) == 0) {
+            overrides.recording_root = arg.substr(std::string("--record-root=").size());
         } else if (arg.rfind("--depth-mode=", 0) == 0) {
             overrides.depth_mode = parseDepthMode(arg.substr(std::string("--depth-mode=").size()));
         } else if (arg.rfind("--serial=", 0) == 0) {
@@ -148,6 +206,30 @@ void Config::applyOverrides(const ConfigOverrides& overrides) {
     }
     if (overrides.enable_point_cloud.has_value()) {
         enable_point_cloud = *overrides.enable_point_cloud;
+    }
+    if (overrides.enable_recording.has_value()) {
+        enable_recording = *overrides.enable_recording;
+    }
+    if (overrides.recording_duration_sec.has_value()) {
+        recording_duration_sec = *overrides.recording_duration_sec;
+    }
+    if (overrides.recording_frame_limit.has_value()) {
+        recording_frame_limit = *overrides.recording_frame_limit;
+    }
+    if (overrides.recording_frame_stride.has_value()) {
+        recording_frame_stride = *overrides.recording_frame_stride;
+    }
+    if (overrides.recording_image_format.has_value()) {
+        recording_image_format = *overrides.recording_image_format;
+    }
+    if (overrides.recording_point_cloud_format.has_value()) {
+        recording_point_cloud_format = *overrides.recording_point_cloud_format;
+    }
+    if (overrides.recording_root.has_value()) {
+        recording_root = *overrides.recording_root;
+    }
+    if (overrides.recording_keyboard_toggle.has_value()) {
+        recording_keyboard_toggle = *overrides.recording_keyboard_toggle;
     }
     if (overrides.depth_mode.has_value()) {
         depth_mode = *overrides.depth_mode;
