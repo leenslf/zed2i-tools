@@ -104,6 +104,21 @@ python -m pip install pandas numpy matplotlib
 python analysis/scripts/analyze_recording.py recordings/<recording_name>/
 ```
 
+## Selecting a Coordinate System
+The ZED uses a 3D Cartesian coordinate system (X, Y, Z) to express positions and orientations, and it can be configured as right-handed or left-handed. 
+
+By default, the ZED uses the Image Coordinate System: right-handed with +Y down, +X right, and +Z pointing away from the camera. 
+
+![ZED right-handed image coordinates](resources/zed_right_handed.jpg)
+
+You can select a different coordinate system via `sl::InitParameters`:
+- `IMAGE` - Right handed, y-down (default)
+- `LEFT_HANDED_Y_UP` - Left handed, y-up (Unity 3D)
+- `RIGHT_HANDED_Y_UP` - Right handed, y-up (OpenGL)
+- `LEFT_HANDED_Z_UP` - Left handed, z-up (Unreal Engine)
+- `RIGHT_HANDED_Z_UP` - Right handed, z-up (CADs, e.g., 3DS Max)
+- `RIGHT_HANDED_Z_UP_X_FORWARD` - Right handed, z-up, x-forward (ROS - REP 103) 
+
 ## Notes
 - `--serial` is parsed but not applied yet. Add the SDK call to select a specific camera serial after verifying the current API.
 - If `find_package(ZED)` fails, set `ZED_SDK_ROOT_DIR` or adjust the CMake logic to match your SDK installation.
