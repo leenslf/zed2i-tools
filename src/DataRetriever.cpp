@@ -43,6 +43,8 @@ sl::ERROR_CODE DataRetriever::retrieve(DataSnapshot& out_snapshot) {
     }
 
     if (config_.enable_odometry) {
+        // Use WORLD so odometry is in a fixed global frame (initialized at tracking start or configured).
+        // See: https://www.stereolabs.com/docs/positional-tracking/coordinate-frames#selecting-a-coordinate-system
         const auto state = camera_.getPosition(pose_, sl::REFERENCE_FRAME::WORLD);
         out_snapshot.odometry = OdometryData{pose_, state};
     }

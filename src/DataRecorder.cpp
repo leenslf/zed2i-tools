@@ -71,15 +71,18 @@ void DataRecorder::handleSnapshot(DataSnapshot& snapshot) {
     const auto frame_index = recorded_frame_count_;
     bool wrote_any = false;
 
-    if (config_.enable_frames && snapshot.frames.has_value()) {
+    const bool svo_mode = config_.enable_point_cloud &&
+                          config_.recording_point_cloud_format == PointCloudFormat::Svo;
+
+    if (config_.enable_frames && !svo_mode && snapshot.frames.has_value()) {
         wrote_any |= writeFrames(*snapshot.frames, frame_index);
     }
 
-    if (config_.enable_imu && snapshot.imu.has_value()) {
+    if (config_.enable_imu && !svo_mode && snapshot.imu.has_value()) {
         wrote_any |= writeImu(*snapshot.imu, snapshot.timestamp);
     }
 
-    if (config_.enable_odometry && snapshot.odometry.has_value()) {
+    if (config_.enable_odometry && !svo_mode && snapshot.odometry.has_value()) {
         wrote_any |= writeOdometry(*snapshot.odometry, snapshot.timestamp);
     }
 
@@ -114,14 +117,17 @@ bool DataRecorder::startSession() {
         return false;
     }
 
-    if (config_.enable_frames) {
+    const bool svo_mode = config_.enable_point_cloud &&
+                          config_.recording_point_cloud_format == PointCloudFormat::Svo;
+
+    if (config_.enable_frames && !svo_mode) {
         std::filesystem::create_directories(images_dir_, ec);
     }
     if (config_.enable_point_cloud) {
         std::filesystem::create_directories(pointclouds_dir_, ec);
     }
 
-    if (config_.enable_imu) {
+    if (config_.enable_imu && !svo_mode) {
         imu_csv_.open(session_dir_ / "imu.csv", std::ios::out);
         if (imu_csv_.is_open()) {
             imu_csv_ << "timestamp,accel_x,accel_y,accel_z,gyro_x,gyro_y,gyro_z,orientation_x,orientation_y,"
@@ -130,7 +136,7 @@ bool DataRecorder::startSession() {
         }
     }
 
-    if (config_.enable_odometry) {
+    if (config_.enable_odometry && !svo_mode) {
         odom_csv_.open(session_dir_ / "odometry.csv", std::ios::out);
         if (odom_csv_.is_open()) {
             odom_csv_ << "timestamp,pos_x,pos_y,pos_z,orientation_x,orientation_y,orientation_z,orientation_w,vel_x,vel_y,"
@@ -154,6 +160,7 @@ bool DataRecorder::startSession() {
             const auto svo_path = (pointclouds_dir_ / "pointcloud.svo").string();
             sl::RecordingParameters params;
             params.video_filename = svo_path.c_str();
+            params.compression_mode = sl::SVO_COMPRESSION_MODE::LOSSLESS;
             const auto status = camera_->enableRecording(params);
             if (status != sl::ERROR_CODE::SUCCESS) {
                 Logger::log(LogLevel::Warn, "Failed to start SVO recording.");

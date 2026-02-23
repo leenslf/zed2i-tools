@@ -28,8 +28,9 @@ public:
 
     sl::Timestamp getTimestamp(sl::TIME_REFERENCE) override { return timestamp; }
 
-    sl::ERROR_CODE enableRecording(const sl::RecordingParameters&) override {
+    sl::ERROR_CODE enableRecording(const sl::RecordingParameters& params) override {
         recording_enabled = true;
+        last_recording_params = params;
         return recording_result;
     }
 
@@ -50,6 +51,7 @@ public:
     bool opened = false;
     bool tracking_enabled = false;
     bool recording_enabled = false;
+    sl::RecordingParameters last_recording_params{};
 
     sl::ERROR_CODE open_result = sl::ERROR_CODE::SUCCESS;
     sl::ERROR_CODE grab_result = sl::ERROR_CODE::SUCCESS;

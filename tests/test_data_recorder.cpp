@@ -7,6 +7,7 @@
 #include <gtest/gtest.h>
 
 #include "DataRecorder.hpp"
+#include "MockZedCamera.hpp"
 
 namespace zedapp {
 namespace {
@@ -155,6 +156,108 @@ TEST(DataRecorderTest, WritesPointCloudPly) {
     std::string header;
     std::getline(ply_in, header);
     EXPECT_EQ(header, "ply");
+
+    recorder.setEnabled(false);
+    std::filesystem::remove_all(config.recording_root);
+}
+
+TEST(DataRecorderTest, SvoSkipsImuOdomAndImages) {
+    Config config;
+    config.enable_frames = true;
+    config.enable_imu = true;
+    config.enable_odometry = true;
+    config.enable_point_cloud = true;
+    config.recording_point_cloud_format = PointCloudFormat::Svo;
+    config.recording_image_format = ImageFormat::Png;
+    config.recording_root = makeTempRoot("zed_recordings").string();
+
+    MockZedCamera camera;
+    DataRecorder recorder(config, &camera);
+    recorder.setEnabled(true);
+
+    DataSnapshot snapshot;
+    snapshot.timestamp = sl::Timestamp();
+    ImuData imu;
+    imu.sample.linear_accel = {1.0f, 2.0f, 3.0f};
+    imu.sample.angular_vel = {0.1f, 0.2f, 0.3f};
+    imu.sample.orientation = {0.0f, 0.0f, 0.0f, 1.0f};
+    snapshot.imu = imu;
+    OdometryData odom;
+    odom.tracking_state = sl::POSITIONAL_TRACKING_STATE::OK;
+    snapshot.odometry = odom;
+    sl::Mat left(1, 1, sl::MAT_TYPE::U8_C4, sl::MEM::CPU);
+    sl::Mat right(1, 1, sl::MAT_TYPE::U8_C4, sl::MEM::CPU);
+    sl::uchar4 pixel{255, 0, 0, 255};
+    left.setValue(0, 0, pixel);
+    right.setValue(0, 0, pixel);
+    snapshot.frames = FrameData{left, right};
+    recorder.handleSnapshot(snapshot);
+
+    const auto session_path = recorder.sessionPath();
+    ASSERT_TRUE(session_path.has_value());
+    EXPECT_FALSE(std::filesystem::exists(*session_path / "imu.csv"));
+    EXPECT_FALSE(std::filesystem::exists(*session_path / "odometry.csv"));
+    EXPECT_FALSE(std::filesystem::exists(*session_path / "images" / "left_000000.png"));
+
+    recorder.setEnabled(false);
+    std::filesystem::remove_all(config.recording_root);
+}
+
+TEST(DataRecorderTest, PlyModeStillWritesImuOdomAndImages) {
+    Config config;
+    config.enable_frames = true;
+    config.enable_imu = true;
+    config.enable_odometry = true;
+    config.enable_point_cloud = true;
+    config.recording_point_cloud_format = PointCloudFormat::Ply;
+    config.recording_image_format = ImageFormat::Png;
+    config.recording_root = makeTempRoot("zed_recordings").string();
+
+    DataRecorder recorder(config);
+    recorder.setEnabled(true);
+
+    DataSnapshot snapshot;
+    snapshot.timestamp = sl::Timestamp();
+    ImuData imu;
+    imu.sample.linear_accel = {1.0f, 2.0f, 3.0f};
+    imu.sample.angular_vel = {0.1f, 0.2f, 0.3f};
+    imu.sample.orientation = {0.0f, 0.0f, 0.0f, 1.0f};
+    snapshot.imu = imu;
+    OdometryData odom;
+    odom.tracking_state = sl::POSITIONAL_TRACKING_STATE::OK;
+    snapshot.odometry = odom;
+    sl::Mat left(1, 1, sl::MAT_TYPE::U8_C4, sl::MEM::CPU);
+    sl::Mat right(1, 1, sl::MAT_TYPE::U8_C4, sl::MEM::CPU);
+    sl::uchar4 pixel{255, 0, 0, 255};
+    left.setValue(0, 0, pixel);
+    right.setValue(0, 0, pixel);
+    snapshot.frames = FrameData{left, right};
+    recorder.handleSnapshot(snapshot);
+
+    const auto session_path = recorder.sessionPath();
+    ASSERT_TRUE(session_path.has_value());
+    EXPECT_TRUE(std::filesystem::exists(*session_path / "imu.csv"));
+    EXPECT_TRUE(std::filesystem::exists(*session_path / "odometry.csv"));
+    EXPECT_TRUE(std::filesystem::exists(*session_path / "images" / "left_000000.png"));
+
+    recorder.setEnabled(false);
+    std::filesystem::remove_all(config.recording_root);
+}
+
+TEST(DataRecorderTest, SvoUsesLosslessCompression) {
+    Config config;
+    config.enable_frames = false;
+    config.enable_imu = false;
+    config.enable_odometry = false;
+    config.enable_point_cloud = true;
+    config.recording_point_cloud_format = PointCloudFormat::Svo;
+    config.recording_root = makeTempRoot("zed_recordings").string();
+
+    MockZedCamera camera;
+    DataRecorder recorder(config, &camera);
+    recorder.setEnabled(true);
+
+    EXPECT_EQ(camera.last_recording_params.compression_mode, sl::SVO_COMPRESSION_MODE::LOSSLESS);
 
     recorder.setEnabled(false);
     std::filesystem::remove_all(config.recording_root);
