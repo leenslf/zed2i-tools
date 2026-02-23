@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
-#include "Config.hpp"
-#include "DataRetriever.hpp"
+#include "camera/Config.hpp"
+#include "camera/DataRetriever.hpp"
 #include "MockZedCamera.hpp"
 
 namespace zedapp {

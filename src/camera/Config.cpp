@@ -1,4 +1,4 @@
-#include "Config.hpp"
+#include "camera/Config.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -7,7 +7,7 @@
 #include <stdexcept>
 #include <unordered_map>
 
-#include "Logger.hpp"
+#include "camera/Logger.hpp"
 
 namespace zedapp {
 namespace {

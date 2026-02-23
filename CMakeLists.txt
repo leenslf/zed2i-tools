@@ -26,13 +26,13 @@ else()
 endif()
 
 add_library(zed_app_core
-    src/CameraManager.cpp
-    src/Config.cpp
-    src/DataRecorder.cpp
-    src/DataRetriever.cpp
-    src/Logger.cpp
-    src/RealZedCamera.cpp
-    src/Validator.cpp
+    src/camera/CameraManager.cpp
+    src/camera/Config.cpp
+    src/camera/DataRecorder.cpp
+    src/camera/DataRetriever.cpp
+    src/camera/Logger.cpp
+    src/camera/RealZedCamera.cpp
+    src/camera/Validator.cpp
 )
 
 target_include_directories(zed_app_core
@@ -48,7 +48,7 @@ target_link_libraries(zed_app_core
         ${CUDA_LIBRARIES}
 )
 
-add_executable(zed_app src/main.cpp)
+add_executable(zed_app src/camera/main.cpp)
 
 target_link_libraries(zed_app PRIVATE zed_app_core)
 

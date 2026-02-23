@@ -4,11 +4,11 @@
 #include <cctype>
 #include <thread>
 
-#include "CameraManager.hpp"
-#include "Config.hpp"
-#include "DataRecorder.hpp"
-#include "DataRetriever.hpp"
-#include "Logger.hpp"
+#include "camera/CameraManager.hpp"
+#include "camera/Config.hpp"
+#include "camera/DataRecorder.hpp"
+#include "camera/DataRetriever.hpp"
+#include "camera/Logger.hpp"
 
 namespace zedapp {
 namespace {

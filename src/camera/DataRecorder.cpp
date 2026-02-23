@@ -1,4 +1,4 @@
-#include "DataRecorder.hpp"
+#include "camera/DataRecorder.hpp"
 
 #include <cmath>
 #include <algorithm>
@@ -8,8 +8,8 @@
 #include <type_traits>
 #include <vector>
 
-#include "Logger.hpp"
-#include "Validator.hpp"
+#include "camera/Logger.hpp"
+#include "camera/Validator.hpp"
 
 namespace zedapp {
 namespace {

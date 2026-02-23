@@ -2,7 +2,7 @@
 
 #include <gtest/gtest.h>
 
-#include "Validator.hpp"
+#include "camera/Validator.hpp"
 
 namespace zedapp {
 

@@ -1,4 +1,4 @@
-#include "RealZedCamera.hpp"
+#include "camera/RealZedCamera.hpp"
 
 namespace zedapp {
 

@@ -2,9 +2,9 @@
 
 #include <gtest/gtest.h>
 
-#include "CameraManager.hpp"
-#include "Config.hpp"
-#include "DataRetriever.hpp"
+#include "camera/CameraManager.hpp"
+#include "camera/Config.hpp"
+#include "camera/DataRetriever.hpp"
 
 namespace zedapp {
 

@@ -3,7 +3,7 @@
 
 #include <gtest/gtest.h>
 
-#include "Config.hpp"
+#include "camera/Config.hpp"
 
 namespace zedapp {
 

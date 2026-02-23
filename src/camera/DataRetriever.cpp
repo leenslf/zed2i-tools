@@ -1,10 +1,10 @@
-#include "DataRetriever.hpp"
+#include "camera/DataRetriever.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <sstream>
 
-#include "Logger.hpp"
+#include "camera/Logger.hpp"
 
 namespace zedapp {
 

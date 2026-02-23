@@ -2,7 +2,7 @@
 
 #include <sl/Camera.hpp>
 
-#include "IZedCamera.hpp"
+#include "camera/IZedCamera.hpp"
 
 namespace zedapp {
 

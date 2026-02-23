@@ -6,7 +6,7 @@
 
 #include <gtest/gtest.h>
 
-#include "DataRecorder.hpp"
+#include "camera/DataRecorder.hpp"
 #include "MockZedCamera.hpp"
 
 namespace zedapp {

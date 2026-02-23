@@ -1,4 +1,4 @@
-#include "Logger.hpp"
+#include "camera/Logger.hpp"
 
 #include <iostream>
 #include <mutex>

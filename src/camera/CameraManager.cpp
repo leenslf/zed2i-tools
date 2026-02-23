@@ -1,12 +1,12 @@
-#include "CameraManager.hpp"
+#include "camera/CameraManager.hpp"
 
 #include <memory>
 #include <sstream>
 
 #include <sl/Camera.hpp>
 
-#include "Logger.hpp"
-#include "RealZedCamera.hpp"
+#include "camera/Logger.hpp"
+#include "camera/RealZedCamera.hpp"
 
 namespace zedapp {
 namespace {
