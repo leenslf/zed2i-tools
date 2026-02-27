@@ -58,12 +58,24 @@ def load_frame(path: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarr
 def main() -> None:
     args = parse_args()
     project_root = Path(__file__).resolve().parents[1]
-    input_dir = project_root / "traversability_grid" / args.folder_name
-    output_dir = project_root / "traversability_frames" / args.folder_name / args.view
-    output_dir.mkdir(parents=True, exist_ok=True)
+    raw_input = Path(args.folder_name)
+    if raw_input.is_absolute():
+        input_dir = raw_input
+        output_stem = raw_input.name
+    else:
+        direct_input = project_root / raw_input
+        grid_input = project_root / "traversability_grid" / raw_input
+        if direct_input.exists():
+            input_dir = direct_input
+        else:
+            input_dir = grid_input
+        output_stem = raw_input.name
+
+    output_dir = project_root / "traversability_frames" / output_stem / args.view
 
     if not input_dir.exists():
         raise FileNotFoundError(f"Input directory not found: {input_dir}")
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     frame_paths = sorted_frame_paths(input_dir)
     if not frame_paths:

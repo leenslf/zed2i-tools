@@ -8,8 +8,11 @@ Current behavior:
 - Applies voxel filtering
 - Applies polarization
 - Applies traversability
-- Optionally writes stage outputs based on config
-- RUN: python3 src/traversability/run_svo_pipeline.py <PATH>
+- If one or more stages have write_output enabled, writes a single NPZ file per
+  frame under temp-offline-outs/<recording>/ containing only the enabled-stage
+  outputs with namespaced keys (e.g. tilt_points, voxel_points, polarize_points,
+  traversability_danger_grid, …) plus a shared timestamp field.
+- RUN: python3 src/traversability/python/run_svo_pipeline.py <PATH>
 """
 
 from __future__ import annotations
@@ -23,12 +26,15 @@ import numpy as np
 import pyzed.sl as sl
 import yaml
 
-from traversability.py.tilt_compensate import tilt_compensate
-from traversability.py.polarize import polarize
+from tilt_compensate import tilt_compensate
+from polarize import polarize
 from traversability import compute_traversability
-from traversability.py.voxel_filter import voxel_filter
+from voxel_filter import voxel_filter
 
 DEFAULT_CONFIG = {
+    "svo": {
+        "frame_skip": 10,
+    },
     "tilt_compensate": {
         "write_output": False,
     },
@@ -60,7 +66,11 @@ LOGGER = logging.getLogger("run_svo_pipeline")
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run SVO offline traversability pipeline.")
-    parser.add_argument("svo_path", type=Path, help="Path to SVO2 recording file.")
+    parser.add_argument(
+        "svo_path",
+        type=Path,
+        help="Path to an SVO/SVO2 file or recording directory containing one.",
+    )
     parser.add_argument(
         "--config",
         type=Path,
@@ -99,6 +109,36 @@ def load_config(config_path: Path) -> Dict[str, Any]:
     return deep_merge(DEFAULT_CONFIG, loaded)
 
 
+def resolve_svo_path(path: Path) -> Path:
+    """Resolve input into a concrete .svo/.svo2 file path."""
+    resolved = path.expanduser().resolve()
+    if not resolved.exists():
+        raise FileNotFoundError(f"SVO path not found: {resolved}")
+
+    if resolved.is_file():
+        if resolved.suffix.lower() not in {".svo", ".svo2"}:
+            raise ValueError(
+                f"Expected .svo or .svo2 file, got: {resolved}"
+            )
+        return resolved
+
+    if not resolved.is_dir():
+        raise ValueError(f"Input path is neither a file nor directory: {resolved}")
+
+    candidates = sorted(resolved.rglob("*.svo")) + sorted(resolved.rglob("*.svo2"))
+    if not candidates:
+        raise FileNotFoundError(
+            f"No .svo/.svo2 file found under directory: {resolved}"
+        )
+    if len(candidates) > 1:
+        pretty = "\n".join(f"- {candidate}" for candidate in candidates)
+        raise ValueError(
+            "Multiple .svo/.svo2 files found. Pass a specific file path:\n"
+            f"{pretty}"
+        )
+    return candidates[0]
+
+
 def open_svo(svo_path: Path) -> sl.Camera:
     """Open SVO2 file and enable positional tracking."""
     zed = sl.Camera()
@@ -109,15 +149,21 @@ def open_svo(svo_path: Path) -> sl.Camera:
     init_params.depth_mode = sl.DEPTH_MODE.PERFORMANCE
     err = zed.open(init_params)
     if err != sl.ERROR_CODE.SUCCESS:
-        raise RuntimeError(f"Failed to open SVO file {svo_path}: {err}")
+        raise RuntimeError(
+            f"Failed to open SVO file {svo_path}: {err}. "
+            "If this is a recording folder, pass the folder and let the script resolve it, "
+            "or pass an explicit .svo/.svo2 file path."
+        )
     zed.enable_positional_tracking(sl.PositionalTrackingParameters())
     return zed
 
 
 def process_svo(project_root: Path, svo_path: Path, config: Dict[str, Any]) -> None:
-    recording_name = svo_path.stem
+    recording_name = svo_path.parent.parent.name
     out_root = project_root / "temp-offline-outs" / recording_name
 
+    svo_cfg = config.get("svo", {})
+    frame_skip = int(svo_cfg.get("frame_skip", 10))
     tilt_cfg = config.get("tilt_compensate", {})
     write_tilt_output = bool(tilt_cfg.get("write_output", False))
     voxel_cfg = config.get("voxel_filter", {})
@@ -126,29 +172,18 @@ def process_svo(project_root: Path, svo_path: Path, config: Dict[str, Any]) -> N
     write_polarize_output = bool(polarize_cfg.get("write_output", False))
     traversability_cfg = config.get("traversability", {})
     write_traversability_output = bool(traversability_cfg.get("write_output", True))
+    any_write = write_tilt_output or write_voxel_output or write_polarize_output or write_traversability_output
     LOGGER.info(
-        "Stage output mode: tilt=%s, voxel=%s, polarize=%s, traversability=%s",
-        "disk" if write_tilt_output else "in-memory",
-        "disk" if write_voxel_output else "in-memory",
-        "disk" if write_polarize_output else "in-memory",
-        "disk" if write_traversability_output else "in-memory",
+        "Stage output flags: tilt=%s, voxel=%s, polarize=%s, traversability=%s — writing %s",
+        write_tilt_output,
+        write_voxel_output,
+        write_polarize_output,
+        write_traversability_output,
+        f"single NPZ to {out_root}/" if any_write else "nothing (all in-memory)",
     )
 
-    detilt_dir = out_root / "detilted_cloud"
-    if write_tilt_output:
-        detilt_dir.mkdir(parents=True, exist_ok=True)
-
-    filtered_dir = out_root / "filtered_cloud"
-    if write_voxel_output:
-        filtered_dir.mkdir(parents=True, exist_ok=True)
-
-    polarized_dir = out_root / "polarized_cloud"
-    if write_polarize_output:
-        polarized_dir.mkdir(parents=True, exist_ok=True)
-
-    traversability_dir = out_root / "traversability_grid"
-    if write_traversability_output:
-        traversability_dir.mkdir(parents=True, exist_ok=True)
+    if any_write:
+        out_root.mkdir(parents=True, exist_ok=True)
 
     zed = open_svo(svo_path)
     point_cloud = sl.Mat()
@@ -171,8 +206,7 @@ def process_svo(project_root: Path, svo_path: Path, config: Dict[str, Any]) -> N
 
             frame_name = f"frame_{frame_index:05d}.npz"
             frame_index += 1
-            # To process every other frame: `if frame_index % 2 != 0: continue`
-            if frame_index % 10 != 0: continue
+            if frame_index % frame_skip != 0: continue
             try:
                 zed.retrieve_measure(point_cloud, sl.MEASURE.XYZ, sl.MEM.CPU)
                 timestamp = zed.get_timestamp(sl.TIME_REFERENCE.IMAGE).get_milliseconds()
@@ -186,57 +220,28 @@ def process_svo(project_root: Path, svo_path: Path, config: Dict[str, Any]) -> N
                 points = points[valid]
 
                 detilted_points = tilt_compensate(points, quaternion)
-
-                if write_tilt_output:
-                    out_path = detilt_dir / frame_name
-                    np.savez(out_path, points=detilted_points, timestamp=timestamp)
-                    with np.load(out_path) as detilted_snapshot:
-                        voxel_input_points = detilted_snapshot["points"]
-                        voxel_timestamp = detilted_snapshot["timestamp"]
-                else:
-                    voxel_input_points = detilted_points
-                    voxel_timestamp = timestamp
-
-                filtered_points = voxel_filter(voxel_input_points, voxel_cfg)
-
-                if write_voxel_output:
-                    out_path = filtered_dir / frame_name
-                    np.savez(out_path, points=filtered_points, timestamp=voxel_timestamp)
-                    with np.load(out_path) as filtered_snapshot:
-                        polarize_input_points = filtered_snapshot["points"]
-                        polarize_timestamp = filtered_snapshot["timestamp"]
-                else:
-                    polarize_input_points = filtered_points
-                    polarize_timestamp = voxel_timestamp
-
-                polarized_points = polarize(polarize_input_points, polarize_cfg)
-
-                if write_polarize_output:
-                    out_path = polarized_dir / frame_name
-                    np.savez(out_path, points=polarized_points, timestamp=polarize_timestamp)
-                    with np.load(out_path) as polarized_snapshot:
-                        traversability_input_points = polarized_snapshot["points"]
-                        traversability_timestamp = polarized_snapshot["timestamp"]
-                else:
-                    traversability_input_points = polarized_points
-                    traversability_timestamp = polarize_timestamp
-
+                filtered_points = voxel_filter(detilted_points, voxel_cfg)
+                polarized_points = polarize(filtered_points, polarize_cfg)
                 danger_grid, valid_mask, nontraversable, r_edges, theta_edges = compute_traversability(
-                    traversability_input_points,
+                    polarized_points,
                     traversability_cfg,
                 )
 
-                if write_traversability_output:
-                    out_path = traversability_dir / frame_name
-                    np.savez(
-                        out_path,
-                        danger_grid=danger_grid,
-                        valid_mask=valid_mask,
-                        nontraversable=nontraversable,
-                        r_edges=r_edges,
-                        theta_edges=theta_edges,
-                        timestamp=traversability_timestamp,
-                    )
+                if any_write:
+                    frame_data: Dict[str, Any] = {"timestamp": timestamp}
+                    if write_tilt_output:
+                        frame_data["tilt_points"] = detilted_points
+                    if write_voxel_output:
+                        frame_data["voxel_points"] = filtered_points
+                    if write_polarize_output:
+                        frame_data["polarize_points"] = polarized_points
+                    if write_traversability_output:
+                        frame_data["traversability_danger_grid"] = danger_grid
+                        frame_data["traversability_valid_mask"] = valid_mask
+                        frame_data["traversability_nontraversable"] = nontraversable
+                        frame_data["traversability_r_edges"] = r_edges
+                        frame_data["traversability_theta_edges"] = theta_edges
+                    np.savez(out_root / frame_name, **frame_data)
 
                 processed_frames += 1
             except Exception as exc:
@@ -260,11 +265,9 @@ def main() -> None:
     )
     args = parse_args()
 
-    svo_path = args.svo_path.expanduser().resolve()
-    if not svo_path.exists():
-        raise FileNotFoundError(f"SVO file not found: {svo_path}")
+    svo_path = resolve_svo_path(args.svo_path)
 
-    project_root = Path(__file__).resolve().parents[2]
+    project_root = Path(__file__).resolve().parents[3]
     config_path = (
         args.config.expanduser().resolve()
         if args.config is not None
