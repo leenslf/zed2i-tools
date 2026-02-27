@@ -2,3 +2,4 @@ build/
 recordings/
 .venv/
 analysis/results/
+temp-offline-outs/

@@ -7,6 +7,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(ZED REQUIRED)
+find_package(Eigen3 REQUIRED)
+find_package(yaml-cpp REQUIRED)
 
 set(_zed_expected_cuda "")
 if (DEFINED ZED_CUDA_VERSION)
@@ -51,6 +53,41 @@ target_link_libraries(zed_app_core
 add_executable(zed_app src/camera/main.cpp)
 
 target_link_libraries(zed_app PRIVATE zed_app_core)
+
+add_library(zed_traversability_core
+    src/traversability/config.cpp
+    src/traversability/offline_pipeline.cpp
+    src/traversability/polarize.cpp
+    src/traversability/tilt_compensate.cpp
+    src/traversability/traversability.cpp
+    src/traversability/voxel_filter.cpp
+)
+
+target_include_directories(zed_traversability_core
+    PUBLIC
+        include
+)
+
+target_link_libraries(zed_traversability_core
+    PUBLIC
+        Eigen3::Eigen
+        yaml-cpp
+)
+
+add_executable(zed_traversability_pipeline src/traversability/main.cpp)
+
+target_link_libraries(zed_traversability_pipeline
+    PRIVATE
+        zed_traversability_core
+        ${ZED_LIBRARIES}
+        ${CUDA_LIBRARIES}
+)
+
+target_include_directories(zed_traversability_pipeline
+    PRIVATE
+        ${ZED_INCLUDE_DIRS}
+        ${CUDA_INCLUDE_DIRS}
+)
 
 enable_testing()
 include(FetchContent)

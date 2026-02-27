@@ -1,0 +1,36 @@
+svo:
+  # Options: METER, CENTIMETER, MILLIMETER, INCH, FOOT
+  coordinate_units: METER
+  # Options: RIGHT_HANDED_Z_UP, RIGHT_HANDED_Z_UP_X_FWD, RIGHT_HANDED_Y_UP, LEFT_HANDED_Y_UP, LEFT_HANDED_Z_UP
+  coordinate_system: RIGHT_HANDED_Z_UP_X_FWD
+  # Options: PERFORMANCE, QUALITY, ULTRA, NEURAL
+  depth_mode: PERFORMANCE
+  frame_skip: 10
+
+tilt_compensate:
+  write_output: false
+  output_dir: temp-offline-outs/tilt_compensate
+
+voxel_filter:
+  voxel_size_x: 0.05
+  voxel_size_y: 0.05
+  voxel_size_z: 0.05
+  min_points_per_voxel: 8
+  write_output: false
+  output_dir: temp-offline-outs/voxel_filter
+
+polarize:
+  z_threshold: 1.5
+  min_range: 0.1
+  write_output: false
+  output_dir: temp-offline-outs/polarize
+
+traversability:
+  danger_threshold: 0.3
+  scrit_deg: 30.0
+  rcrit_m: 0.10
+  hcrit_m: 0.20
+  polar_grid_size_r_m: 0.10
+  polar_grid_size_theta_deg: 1.0
+  write_output: true
+  output_dir: temp-offline-outs/traversability

@@ -157,7 +157,7 @@ bool DataRecorder::startSession() {
         if (!camera_) {
             Logger::log(LogLevel::Warn, "SVO recording requested but no camera handle available.");
         } else {
-            const auto svo_path = (pointclouds_dir_ / "pointcloud.svo").string();
+            const auto svo_path = (pointclouds_dir_ / "RECORDING.svo").string();
             sl::RecordingParameters params;
             params.video_filename = svo_path.c_str();
             params.compression_mode = sl::SVO_COMPRESSION_MODE::LOSSLESS;

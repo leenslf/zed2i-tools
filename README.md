@@ -56,7 +56,9 @@ When recording is enabled, the app writes to `recordings/YYYY-MM-DD_HH-MM-SS/` w
 - `images/` left/right frame images
 - `imu.csv`
 - `odometry.csv`
-- `pointclouds/` (`.ply` per frame or a single `pointcloud.svo` when SVO recording is enabled)
+- `pointclouds/` (`.ply` per frame)
+OR
+- a single `RECORDING.svo` when SVO recording is enabled
 
 ### Command-line flags
 - `--config <path>` load a config file
