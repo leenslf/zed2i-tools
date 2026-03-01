@@ -89,8 +89,10 @@ def compute_traversability(
     theta = polar_points[:, 1]
     z = polar_points[:, 2]
 
-    r_min, r_max = float(r.min()), float(r.max())
-    theta_min, theta_max = float(theta.min()), float(theta.max())
+    r_min = float(config.get("r_min_m", r.min()))
+    r_max = float(config.get("r_max_m", r.max()))
+    theta_min = float(np.deg2rad(config.get("theta_min_deg", float(np.degrees(theta.min())))))
+    theta_max = float(np.deg2rad(config.get("theta_max_deg", float(np.degrees(theta.max())))))
     r_edges = np.arange(r_min, r_max + polar_grid_size_r, polar_grid_size_r, dtype=np.float32)
     theta_edges = np.arange(
         theta_min,

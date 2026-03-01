@@ -8,7 +8,7 @@ svo:
   frame_skip: 10
 
 tilt_compensate:
-  write_output: false
+  write_output: true
   output_dir: temp-offline-outs/tilt_compensate
 
 voxel_filter:
@@ -26,6 +26,10 @@ polarize:
   output_dir: temp-offline-outs/polarize
 
 traversability:
+  r_min_m: 0.3
+  r_max_m: 2.0
+  theta_min_deg: -45.0
+  theta_max_deg: 45.0
   danger_threshold: 0.3
   scrit_deg: 30.0
   rcrit_m: 0.10

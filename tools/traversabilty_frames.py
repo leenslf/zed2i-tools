@@ -20,9 +20,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("folder_name", help="Recording folder name under traversability_grid/.")
     parser.add_argument(
         "--view",
-        choices=("2d", "polar"),
+        choices=("2d", "polar", "cartesian", "cartesian_pc"),
         default="2d",
-        help="Visualization mode: 2d or polar (default: 2d).",
+        help="Visualization mode: 2d, polar, cartesian, or cartesian_pc (default: 2d).",
     )
     return parser.parse_args()
 
@@ -37,22 +37,34 @@ def sorted_frame_paths(input_dir: Path) -> list[Path]:
     return [p for _, p in frames]
 
 
-def load_frame(path: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+def _pick_key(data: np.lib.npyio.NpzFile, key: str) -> str:
+    """Return either legacy key or traversability-prefixed key."""
+    if key in data:
+        return key
+    prefixed = f"traversability_{key}"
+    if prefixed in data:
+        return prefixed
+    raise KeyError(
+        f"{data.filename} does not contain `{key}` or `{prefixed}`."
+    )
+
+
+def load_frame(
+    path: Path,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     with np.load(path) as data:
-        for key in ("danger_grid", "valid_mask", "nontraversable", "r_edges", "theta_edges"):
-            if key not in data:
-                raise KeyError(f"{path} does not contain `{key}`.")
-        danger_grid = np.asarray(data["danger_grid"], dtype=np.float32)
-        valid_mask = np.asarray(data["valid_mask"], dtype=bool)
-        nontraversable = np.asarray(data["nontraversable"], dtype=bool)
-        r_edges = np.asarray(data["r_edges"], dtype=np.float32)
-        theta_edges = np.asarray(data["theta_edges"], dtype=np.float32)
+        danger_grid = np.asarray(data[_pick_key(data, "danger_grid")], dtype=np.float32)
+        valid_mask = np.asarray(data[_pick_key(data, "valid_mask")], dtype=bool)
+        nontraversable = np.asarray(data[_pick_key(data, "nontraversable")], dtype=bool)
+        r_edges = np.asarray(data[_pick_key(data, "r_edges")], dtype=np.float32)
+        theta_edges = np.asarray(data[_pick_key(data, "theta_edges")], dtype=np.float32)
+        tilt_points = np.asarray(data["tilt_points"], dtype=np.float32)
 
     if danger_grid.shape != valid_mask.shape or danger_grid.shape != nontraversable.shape:
         raise ValueError(f"Inconsistent grid shapes in {path}.")
     if danger_grid.shape != (r_edges.size - 1, theta_edges.size - 1):
         raise ValueError(f"Grid/edge shape mismatch in {path}.")
-    return danger_grid, valid_mask, nontraversable, r_edges, theta_edges
+    return danger_grid, valid_mask, nontraversable, r_edges, theta_edges, tilt_points
 
 
 def main() -> None:
@@ -88,13 +100,16 @@ def main() -> None:
     total = len(frame_paths)
     for idx, frame_path in enumerate(frame_paths, start=1):
         print(f"Processing frame {idx:04d}/{total:04d}")
-        danger_grid, valid_mask, nontraversable, r_edges, theta_edges = load_frame(frame_path)
+        danger_grid, valid_mask, nontraversable, r_edges, theta_edges, tilt_points = load_frame(
+            frame_path
+        )
 
         # Same coloring logic as visualize_traversability.py.
         plot_values = np.array(danger_grid, copy=True, dtype=np.float32)
         plot_values[valid_mask & nontraversable] = 1.1
 
         fig = plt.figure(figsize=(9, 7))
+        mesh = None
         if args.view == "polar":
             ax = fig.add_subplot(111, projection="polar")
             mesh = ax.pcolormesh(
@@ -110,6 +125,67 @@ def main() -> None:
             ax.set_thetamin(theta_min_deg - 5.0)
             ax.set_thetamax(theta_max_deg + 5.0)
             title_view = "Polar View"
+        elif args.view == "cartesian":
+            ax = fig.add_subplot(111)
+            n_r = nontraversable.shape[0]
+            first_true = np.argmax(nontraversable, axis=0)
+            has_true = np.any(nontraversable, axis=0)
+            row_indices = np.where(has_true, first_true, n_r)
+
+            theta_centers = 0.5 * (theta_edges[:-1] + theta_edges[1:])
+            obstacle_ranges = r_edges[row_indices][has_true]
+            theta_centers = theta_centers[has_true]
+            x_raw = obstacle_ranges * np.cos(theta_centers)
+            y_raw = obstacle_ranges * np.sin(theta_centers)
+            x = -y_raw
+            y = x_raw
+
+            ax.set_aspect("equal", adjustable="box")
+            ax.set_xlim(-0.75, 0.75)
+            ax.set_ylim(0.2, 0.8)
+            ax.set_xlabel("X (m)")
+            ax.set_ylabel("Y (m)")
+            ax.grid(True, alpha=0.3)
+            ax.legend(loc="upper right")
+            title_view = "Cartesian View"
+        elif args.view == "cartesian_pc":
+            ax = fig.add_subplot(111)
+            n_r = nontraversable.shape[0]
+            first_true = np.argmax(nontraversable, axis=0)
+            has_true = np.any(nontraversable, axis=0)
+            row_indices = np.where(has_true, first_true, n_r)
+
+            theta_centers = 0.5 * (theta_edges[:-1] + theta_edges[1:])
+            obstacle_ranges = r_edges[row_indices][has_true]
+            theta_centers = theta_centers[has_true]
+            x_raw = obstacle_ranges * np.cos(theta_centers)
+            y_raw = obstacle_ranges * np.sin(theta_centers)
+            x = -y_raw
+            y = x_raw
+            pc_x = -tilt_points[:, 1]
+            pc_y = tilt_points[:, 0]
+
+            pc_scatter = ax.scatter(
+                pc_x,
+                pc_y,
+                c=tilt_points[:, 2],
+                cmap="viridis",
+                s=2,
+                alpha=0.6,
+                vmin=-0.3,
+                vmax=0.3,
+            )
+            fig.colorbar(pc_scatter, ax=ax, label="Z (m)")
+            ax.scatter(x, y, s=8, color="tab:red", label="Nearest obstacle boundary", zorder=3)
+            ax.scatter([0.0], [0.0], color="tab:blue", s=35, marker="o", label="Robot", zorder=4)
+            ax.set_aspect("equal", adjustable="box")
+            ax.set_xlim(-0.75, 0.75)
+            ax.set_ylim(0.2, 0.8)
+            ax.set_xlabel("X (m)")
+            ax.set_ylabel("Y (m)")
+            ax.grid(True, alpha=0.3)
+            ax.legend(loc="upper right")
+            title_view = "Cartesian PC View"
         else:
             ax = fig.add_subplot(111)
             theta_edges_deg = np.degrees(theta_edges)
@@ -132,7 +208,8 @@ def main() -> None:
             ax.set_ylabel("Range (m)")
             title_view = "Range-Angle Grid"
 
-        fig.colorbar(mesh, ax=ax, label="Danger Score")
+        if mesh is not None:
+            fig.colorbar(mesh, ax=ax, label="Danger Score")
         ax.set_title(f"{frame_path.name} | {title_view}")
 
         out_path = output_dir / f"{frame_path.stem}.png"

@@ -3,3 +3,6 @@ recordings/
 .venv/
 analysis/results/
 temp-offline-outs/
+traversability_frames/
+tools/__pycache__/
+src/traversability/python/__pycache__/
