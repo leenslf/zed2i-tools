@@ -3,10 +3,21 @@
 Minimal, modular ZED 2i application using the official ZED SDK C++ API. The code is organized for easy extension and testing.
 
 ## Structure
-- `include/` public headers
-- `src/` implementation
+- `include/` 
+
+    - `camera`
+    - `traversability` (work in progress)
+- `src/`
+    - `camera`
+    - `traversability` (work in progress, currenly using Python)
 - `tests/` unit + integration tests
-- `config/` example configuration
+- `config/` 
+
+    - example configuration
+    - traversability pipeline config
+- `resources/` images and videos for doc
+- `analysis/` (unnecessary)
+- `tools/` Python scripts to process output of the offline traversability pipeline.
 
 ## Prerequisites
 - ZED 2i camera connected via USB 3.x
@@ -16,49 +27,25 @@ Minimal, modular ZED 2i application using the official ZED SDK C++ API. The code
 - C++17 compiler (GCC/Clang)
 - CMake 3.16+
 
-## Easy installation (Ubuntu 22)
-```bash
-# Download installer
-wget https://download.stereolabs.com/zedsdk/4.2/cu130/ubuntu22
-
-# Make executable
-chmod +x ubuntu22
-
-# Install
-./ubuntu22
-
-# Follow prompts (accept license, choose components)
-```
-
-Verify installation:
-```bash
-# Check version
-/usr/local/zed/tools/ZED_Explorer
-
-# Add to bashrc if needed
-echo 'export LD_LIBRARY_PATH=/usr/local/zed/lib:$LD_LIBRARY_PATH' >> ~/.bashrc
-source ~/.bashrc
-```
-
-## Build
+## Build & Run
 ```bash
 cmake -S . -B build
 cmake --build build -j
 ```
 
-## Run
 ```bash
 ./build/zed_app --config config/example.conf --iterations=200
 ```
 
 ### Recording output
 When recording is enabled, the app writes to `recordings/YYYY-MM-DD_HH-MM-SS/` with:
-- `images/` left/right frame images
-- `imu.csv`
-- `odometry.csv`
-- `pointclouds/` (`.ply` per frame)
+1. (legacy, might be removed later)
+    - `images/` left/right frame images
+    - `imu.csv`
+    - `odometry.csv`
+    - `pointclouds/` (`.ply` per frame)
 OR
-- a single `RECORDING.svo` when SVO recording is enabled
+2. A single `RECORDING.svo` when SVO recording is enabled
 
 ### Command-line flags
 - `--config <path>` load a config file
@@ -79,7 +66,8 @@ OR
 - `--iterations=<N>` run N loops, 0 for infinite (default)
 - `--sleep-ms=<N>` sleep between loops (default 5 ms)
 
-## Tests
+## Tests for the camera 
+(no formal unit/ integration tests for traversability pipeline, yet)
 ```bash
 ctest --test-dir build
 ```
@@ -90,21 +78,6 @@ Set `ZED_TEST_LIVE=1` to enable the live camera integration test:
 ZED_TEST_LIVE=1 ctest --test-dir build -R Integration
 ```
 
-## Analysis (Python)
-The recording analysis script lives in `analysis/scripts/analyze_recording.py` and writes results to `analysis/results/<recording_name>/`.
-
-### Setup (venv)
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install pandas numpy matplotlib
-```
-
-### Run analysis
-```bash
-python analysis/scripts/analyze_recording.py recordings/<recording_name>/
-```
 
 ## Selecting a Coordinate System
 The ZED uses a 3D Cartesian coordinate system (X, Y, Z) to express positions and orientations, and it can be configured as right-handed or left-handed. 
@@ -121,6 +94,47 @@ You can select a different coordinate system via `sl::InitParameters`:
 - `RIGHT_HANDED_Z_UP` - Right handed, z-up (CADs, e.g., 3DS Max)
 - `RIGHT_HANDED_Z_UP_X_FORWARD` - Right handed, z-up, x-forward (ROS - REP 103) 
 
-## Notes
-- `--serial` is parsed but not applied yet. Add the SDK call to select a specific camera serial after verifying the current API.
-- If `find_package(ZED)` fails, set `ZED_SDK_ROOT_DIR` or adjust the CMake logic to match your SDK installation.
+
+
+## Traversabilty
+Currently experimenting with a traversability computation pipeline on offline recorded data directly from the ZED camera in svo format. For more on the experiments conducted so far check out [Experiments.md](Experiments.md).
+### Traversability pipeline:
+1. **Input recording (`.svo`)**
+   Use an `.svo` file recorded by the ZED stereo camera, which contains synchronized left/right images and odometry.
+2. **Per-frame point cloud generation**
+   Decode the `.svo` stream and reconstruct a 3D point cloud for each frame.
+3. **Tilt compensation (using odometry)**
+   Use the estimated camera orientation to de-tilt each point cloud into a more stable reference frame.
+4. **Voxel filtering**
+   Downsample the corrected cloud with a voxel grid to reduce noise and computation while preserving structure.
+5. **Cartesian-to-polar projection**
+   Project the filtered 3D cloud into a polar grid representation suitable for terrain analysis.
+6. **Traversability computation**
+   Compute traversability from the polar representation.
+7. **Output artifacts (`.npz`)**
+   Save intermediate/final arrays and metadata in `.npz` format for visualization and analysis.
+
+See [pipeline config](config/pipeline_config.yaml) for tunable parameters and pipeline options.
+
+### Experiment pipeline:
+
+1. Record and label data 
+    ```bash 
+    ./build/zed_app --record --record-duration=<no-seconds> --enable-point-cloud --record-pointcloud-format=svo
+    ```
+2. Run the traversability pipeline on the recorded data
+    ```bash 
+    python3 src/traversability/python/run_svo_pipeline.py  recordings/<label>/
+    ```
+3. Visualize results of experiment
+    ```bash 
+    python3 tools/svo_offline_summary.py temp-offline-outs/ROLL-YAW-P/ --pc-plane xz
+    ```
+    Check out [svo_offline_summary.py](tools/svo_offline_summary.py) for optional CLI args.
+    ```bash
+                                    polar2cartesian.py (plot polar and cartesian traversability grids)
+    svo_offline_summary.py  ->   
+                                    pointcloud_comparison.py (plot overlay of original & detilted cloud)
+
+    ```
+    to-do: improve pointcloud_comparison.py plotting.
