@@ -1,112 +1,79 @@
 #!/usr/bin/env python3
-"""Generate a single PNG summary from an SVO via the offline traversability pipeline.
+"""Render 2x2 offline summaries from NPZ traversability frames.
 
-Usage
------
-python3 tools/svo_offline_summary.py <svo_path> [options]
-
-Examples
---------
-1) Run pipeline + render first available NPZ frame:
-   python3 tools/svo_offline_summary.py /data/run_001.svo2
-
-2) Reuse existing NPZ outputs and render a specific frame id:
-   python3 tools/svo_offline_summary.py /data/run_001.svo2 --use-existing --frame-id 24
-
-3) Use YZ side projection and custom output path:
-   python3 tools/svo_offline_summary.py /data/run_001.svo2 --side-plane yz --out /tmp/summary.png
-
-Key arguments
--------------
-- svo_path (positional): .svo/.svo2 file or a directory containing one.
-- --config PATH: pipeline YAML (default: config/pipeline_config.yaml).
-- --use-existing: skip running offline pipeline and reuse NPZ files.
-- --frame-id N: choose frame_000NN.npz by id.
-- --frame-pos N: choose frame by sorted position if --frame-id is not set.
-- --side-plane {xz,yz}: side projection for raw/tilt point-cloud panels.
-- --max-points N: downsample plotted points for readability/performance.
-- --out PATH: output PNG path.
-
-Output
-------
-A single PNG with 5 panels:
-1) SVO image frame
-2) Input point cloud side view
-3) Tilt-compensated point cloud side view
-4) Traversability polar grid
-5) Traversability cartesian with tilt_points overlay
+Layout per frame:
+- Top-left: image from NPZ
+- Top-right: dense pointcloud comparison (input vs tilt)
+- Bottom-left: traversability polar
+- Bottom-right: traversability Cartesian (+ optional pointcloud overlay)
 """
 
 from __future__ import annotations
 
 import argparse
 import re
-import sys
 from pathlib import Path
-from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.colors import Normalize
+
+from pointcloud_comparison import load_clouds_from_npz, plot_comparison
+from polar2cartesian import (
+    build_polar_grid,
+    draw_cartesian_overlay,
+    draw_polar,
+    load_npz_frame,
+    polar_to_cartesian,
+)
 
 
 FRAME_PATTERN = re.compile(r"^frame_(\d+)\.npz$")
+IMAGE_KEYS = ("input_image_bgra", "image_rgb", "left_image_rgb", "image", "left_image")
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description=(
-            "Run/reuse offline SVO traversability outputs and render a 5-panel summary PNG."
-        )
+        description="Render NPZ summaries with image, pointcloud comparison, polar, and cartesian plots."
     )
-    parser.add_argument("svo_path", type=Path, help="Path to .svo/.svo2 or directory containing one.")
-    parser.add_argument(
-        "--config",
-        type=Path,
-        default=None,
-        help="Pipeline config YAML (default: config/pipeline_config.yaml).",
-    )
-    parser.add_argument(
-        "--use-existing",
-        action="store_true",
-        help="Reuse existing NPZ outputs instead of running the offline pipeline.",
-    )
-    parser.add_argument(
-        "--frame-id",
-        type=int,
-        default=None,
-        help="Frame id from NPZ name (e.g. frame_00024.npz -> 24). Default: first available.",
-    )
+    parser.add_argument("npz_dir", type=Path, help="Folder containing frame_*.npz files.")
+    parser.add_argument("--frame-id", type=int, default=None, help="Render only this frame id.")
     parser.add_argument(
         "--frame-pos",
         type=int,
-        default=0,
-        help="Position in sorted NPZ list when --frame-id is not set (default: 0).",
+        default=None,
+        help="Render only this index in sorted frame list.",
     )
     parser.add_argument(
-        "--side-plane",
-        choices=("xz", "yz"),
-        default="xz",
-        help="Side projection plane for point clouds (default: xz).",
+        "--all",
+        action="store_true",
+        help="Render all frames (default when no --frame-id/--frame-pos is provided).",
+    )
+    parser.add_argument("--xy-res", type=float, default=0.05, help="Cartesian grid resolution (m).")
+    parser.add_argument("--max-points", type=int, default=100000, help="Max points per cloud plot.")
+    parser.add_argument(
+        "--pc-plane",
+        choices=("xy", "xz", "yz"),
+        default="xy",
+        help="Projection plane for pointcloud_comparison panel (default: xy).",
     )
     parser.add_argument(
-        "--max-points",
-        type=int,
-        default=80000,
-        help="Max points to plot per point-cloud panel (default: 80000).",
+        "--no-pc-overlay",
+        action="store_true",
+        help="Disable tilt pointcloud overlay in traversability Cartesian panel.",
+    )
+    parser.add_argument(
+        "--out-dir",
+        type=Path,
+        default=None,
+        help="Output directory (default: traversability_frames/<npz_folder_name>).",
     )
     parser.add_argument(
         "--out",
         type=Path,
         default=None,
-        help="Output PNG path (default: traversability_frames/<recording>/summary/frame_XXXXX.png).",
+        help="Output file path for single-frame mode only.",
     )
     return parser.parse_args()
-
-
-def _add_pipeline_module_path(project_root: Path) -> None:
-    module_dir = project_root / "src" / "traversability" / "python"
-    sys.path.insert(0, str(module_dir))
 
 
 def sorted_frame_paths(input_dir: Path) -> list[Path]:
@@ -119,277 +86,219 @@ def sorted_frame_paths(input_dir: Path) -> list[Path]:
     return [path for _, path in frames]
 
 
-def frame_id_from_name(path: Path) -> int:
-    match = FRAME_PATTERN.match(path.name)
-    if not match:
-        raise ValueError(f"Invalid frame file name: {path.name}")
-    return int(match.group(1))
-
-
-def pick_frame(frame_paths: list[Path], frame_id: int | None, frame_pos: int) -> Path:
-    if not frame_paths:
-        raise FileNotFoundError("No frame_*.npz files found.")
+def _pick_frame(frames: list[Path], frame_id: int | None, frame_pos: int | None) -> list[Path]:
     if frame_id is not None:
         target = f"frame_{frame_id:05d}.npz"
-        for path in frame_paths:
-            if path.name == target:
-                return path
-        raise FileNotFoundError(f"Requested frame id not found: {target}")
-    if frame_pos < 0 or frame_pos >= len(frame_paths):
-        raise IndexError(
-            f"--frame-pos {frame_pos} out of range for {len(frame_paths)} frames."
-        )
-    return frame_paths[frame_pos]
+        for frame in frames:
+            if frame.name == target:
+                return [frame]
+        raise FileNotFoundError(f"Frame not found: {target}")
+
+    if frame_pos is not None:
+        if frame_pos < 0 or frame_pos >= len(frames):
+            raise IndexError(f"frame-pos {frame_pos} out of range [0, {len(frames)-1}]")
+        return [frames[frame_pos]]
+
+    return frames
 
 
-def _pick_key(data: np.lib.npyio.NpzFile, key: str) -> str:
-    if key in data:
-        return key
-    prefixed = f"traversability_{key}"
-    if prefixed in data:
-        return prefixed
-    raise KeyError(f"{data.filename} missing `{key}` or `{prefixed}`.")
-
-
-def load_npz_frame(path: Path) -> dict[str, np.ndarray]:
+def _load_image_from_npz(path: Path) -> np.ndarray | None:
     with np.load(path) as data:
-        if "tilt_points" not in data:
-            raise KeyError(
-                f"{path} missing `tilt_points`. Enable tilt_compensate.write_output in config."
-            )
-        out: dict[str, np.ndarray] = {
-            "tilt_points": np.asarray(data["tilt_points"], dtype=np.float32),
-            "danger_grid": np.asarray(data[_pick_key(data, "danger_grid")], dtype=np.float32),
-            "valid_mask": np.asarray(data[_pick_key(data, "valid_mask")], dtype=bool),
-            "nontraversable": np.asarray(data[_pick_key(data, "nontraversable")], dtype=bool),
-            "r_edges": np.asarray(data[_pick_key(data, "r_edges")], dtype=np.float32),
-            "theta_edges": np.asarray(data[_pick_key(data, "theta_edges")], dtype=np.float32),
-        }
-    return out
+        key = next((k for k in IMAGE_KEYS if k in data), None)
+        if key is None:
+            return None
+        image = np.asarray(data[key])
+
+    if image.ndim != 3:
+        return None
+    if key == "input_image_bgra":
+        if image.shape[2] < 3:
+            return None
+        image = image[:, :, :3][:, :, ::-1]
+    if image.shape[2] == 4:
+        image = image[:, :, :3]
+    if image.dtype != np.uint8:
+        if np.issubdtype(image.dtype, np.floating):
+            image = np.clip(image * 255.0, 0, 255).astype(np.uint8)
+        else:
+            image = np.clip(image, 0, 255).astype(np.uint8)
+    return image
 
 
-def sample_points(points: np.ndarray, max_points: int) -> np.ndarray:
-    if max_points <= 0 or points.shape[0] <= max_points:
-        return points
-    idx = np.random.default_rng(0).choice(points.shape[0], size=max_points, replace=False)
-    return points[idx]
+def _frame_id_from_name(path: Path) -> int:
+    m = FRAME_PATTERN.match(path.name)
+    if not m:
+        raise ValueError(f"Invalid frame filename: {path.name}")
+    return int(m.group(1))
 
 
-def side_projection(points: np.ndarray, plane: str) -> tuple[np.ndarray, np.ndarray, str, str]:
-    if plane == "xz":
-        return points[:, 0], points[:, 2], "X (m)", "Z (m)"
-    return points[:, 1], points[:, 2], "Y (m)", "Z (m)"
-
-
-def fetch_image_and_raw_points(svo_path: Path, target_frame_id: int) -> tuple[np.ndarray, np.ndarray]:
-    import pyzed.sl as sl
-    import run_svo_pipeline as pipeline
-
-    zed = pipeline.open_svo(svo_path)
-    image = sl.Mat()
-    point_cloud = sl.Mat()
-    frame_index = 0
-
-    try:
-        while True:
-            err = zed.grab()
-            if err == sl.ERROR_CODE.END_OF_SVOFILE_REACHED:
-                break
-            if err != sl.ERROR_CODE.SUCCESS:
-                frame_index += 1
-                continue
-
-            if frame_index == target_frame_id:
-                zed.retrieve_image(image, sl.VIEW.LEFT, sl.MEM.CPU)
-                zed.retrieve_measure(point_cloud, sl.MEASURE.XYZ, sl.MEM.CPU)
-
-                image_bgra = image.get_data()
-                image_rgb = image_bgra[:, :, :3][:, :, ::-1].copy()
-
-                pc_data = point_cloud.get_data()[:, :, :3].reshape(-1, 3)
-                valid = np.isfinite(pc_data).all(axis=1)
-                raw_points = pc_data[valid].astype(np.float32, copy=False)
-                return image_rgb, raw_points
-
-            frame_index += 1
-    finally:
-        zed.close()
-
-    raise FileNotFoundError(
-        f"Could not read SVO frame {target_frame_id}. "
-        "This may happen if NPZ frame IDs do not align with the source recording."
-    )
-
-
-def draw_polar(ax: Any, danger_grid: np.ndarray, valid_mask: np.ndarray, nontrav: np.ndarray, r_edges: np.ndarray, theta_edges: np.ndarray) -> None:
-    cmap = plt.get_cmap("RdYlGn_r").copy()
-    cmap.set_over("black")
-    norm = Normalize(vmin=0.0, vmax=1.0, clip=False)
-    plot_values = np.array(danger_grid, copy=True, dtype=np.float32)
-    plot_values[valid_mask & nontrav] = 1.1
-    mesh = ax.pcolormesh(theta_edges, r_edges, plot_values, cmap=cmap, norm=norm, shading="auto")
-    ax.set_thetamin(float(np.degrees(theta_edges.min())) - 5.0)
-    ax.set_thetamax(float(np.degrees(theta_edges.max())) + 5.0)
-    ax.set_title("Traversability (Polar)")
-    ax.figure.colorbar(mesh, ax=ax, fraction=0.046, pad=0.07, label="Danger")
-
-
-def draw_cartesian_overlay(ax: Any, nontrav: np.ndarray, r_edges: np.ndarray, theta_edges: np.ndarray, tilt_points: np.ndarray) -> None:
-    n_r = nontrav.shape[0]
-    first_true = np.argmax(nontrav, axis=0)
-    has_true = np.any(nontrav, axis=0)
-    row_indices = np.where(has_true, first_true, n_r)
-
-    theta_centers = 0.5 * (theta_edges[:-1] + theta_edges[1:])
-    obstacle_ranges = r_edges[row_indices][has_true]
-    theta_obstacles = theta_centers[has_true]
-
-    x_raw = obstacle_ranges * np.cos(theta_obstacles)
-    y_raw = obstacle_ranges * np.sin(theta_obstacles)
-    boundary_x = -y_raw
-    boundary_y = x_raw
-
-    pc_x = -tilt_points[:, 1]
-    pc_y = tilt_points[:, 0]
-    sc = ax.scatter(
-        pc_x,
-        pc_y,
-        c=tilt_points[:, 2],
-        cmap="viridis",
-        s=2,
-        alpha=0.6,
-        linewidths=0,
-        vmin=-0.3,
-        vmax=0.3,
-    )
-    ax.scatter(boundary_x, boundary_y, s=7, color="tab:red", label="Obstacle boundary", zorder=3)
-    ax.scatter([0.0], [0.0], color="tab:blue", s=30, marker="o", label="Robot", zorder=4)
-    ax.set_aspect("equal", adjustable="box")
-    ax.set_xlim(-0.75, 0.75)
-    ax.set_ylim(0.2, 0.8)
-    ax.set_xlabel("X (m)")
-    ax.set_ylabel("Y (m)")
-    ax.grid(True, alpha=0.3)
-    ax.legend(loc="upper right")
-    ax.set_title("Traversability (Cartesian + tilt_points)")
-    ax.figure.colorbar(sc, ax=ax, fraction=0.046, pad=0.04, label="Z (m)")
-
-
-def render_summary(
-    image_rgb: np.ndarray,
-    raw_points: np.ndarray,
-    tilt_points: np.ndarray,
-    danger_grid: np.ndarray,
-    valid_mask: np.ndarray,
-    nontrav: np.ndarray,
-    r_edges: np.ndarray,
-    theta_edges: np.ndarray,
-    side_plane: str,
+def render_frame(
+    frame_path: Path,
     out_path: Path,
+    xy_res: float,
     max_points: int,
+    pc_plane: str,
+    show_pc_overlay: bool,
 ) -> None:
-    raw_points = sample_points(raw_points, max_points)
-    tilt_points = sample_points(tilt_points, max_points)
+    danger_grid, valid_mask, nontraversable, r_edges, theta_edges, tilt_points = load_npz_frame(
+        frame_path
+    )
+    polar_grid = build_polar_grid(danger_grid, valid_mask, nontraversable)
+    cart_grid, x_coords, y_coords = polar_to_cartesian(
+        polar_grid=polar_grid,
+        valid_mask=valid_mask,
+        r_edges=r_edges,
+        theta_edges=theta_edges,
+        cart_resolution=xy_res,
+    )
 
-    fig = plt.figure(figsize=(20, 11))
-    gs = fig.add_gridspec(2, 3)
+    pc_compare_error: str | None = None
+    try:
+        input_points, tilt_compare_points = load_clouds_from_npz(frame_path)
+    except Exception as exc:
+        input_points = np.empty((0, 3), dtype=np.float32)
+        tilt_compare_points = np.empty((0, 3), dtype=np.float32)
+        pc_compare_error = str(exc)
+    image = _load_image_from_npz(frame_path)
 
-    ax1 = fig.add_subplot(gs[0, 0])
-    ax1.imshow(image_rgb)
-    ax1.axis("off")
-    ax1.set_title("SVO Frame (LEFT)")
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10), constrained_layout=True)
+    ax_img = axes[0, 0]
+    ax_pc = axes[0, 1]
+    ax_polar = axes[1, 0]
+    ax_cart = axes[1, 1]
 
-    ax2 = fig.add_subplot(gs[0, 1])
-    sx, sz, sx_label, sz_label = side_projection(raw_points, side_plane)
-    ax2.scatter(sx, sz, s=1, c=sz, cmap="viridis", alpha=0.6, linewidths=0)
-    ax2.set_xlabel(sx_label)
-    ax2.set_ylabel(sz_label)
-    ax2.set_xlim(-0.2, 1.0)
-    ax2.set_ylim(-0.4, 0.6)
-    ax2.set_title(f"Input Point Cloud Side ({side_plane})")
-    ax2.grid(True, alpha=0.3)
+    if image is None:
+        ax_img.set_facecolor("#111111")
+        ax_img.text(
+            0.5,
+            0.5,
+            "No image found in NPZ\n(expected key: input_image_bgra)",
+            ha="center",
+            va="center",
+            color="white",
+            fontsize=10,
+            transform=ax_img.transAxes,
+        )
+        ax_img.set_xticks([])
+        ax_img.set_yticks([])
+    else:
+        ax_img.imshow(image)
+        ax_img.axis("off")
+    ax_img.set_title("Image from the SVO")
 
-    ax3 = fig.add_subplot(gs[0, 2])
-    tx, tz, tx_label, tz_label = side_projection(tilt_points, side_plane)
-    ax3.scatter(tx, tz, s=1, c=tz, cmap="viridis", alpha=0.6, linewidths=0)
-    ax3.set_xlabel(tx_label)
-    ax3.set_ylabel(tz_label)
-    ax3.set_xlim(-0.2, 1.0)
-    ax3.set_ylim(-0.4, 0.6)
-    ax3.set_title(f"Tilt-Compensated Side ({side_plane})")
-    ax3.grid(True, alpha=0.3)
+    if pc_compare_error is None:
+        plot_comparison(
+            ax=ax_pc,
+            input_points=input_points,
+            tilt_points=tilt_compare_points,
+            max_points=max_points,
+            plane=pc_plane,
+            title="plot from pointcloud_comparison.py",
+        )
+    else:
+        ax_pc.set_facecolor("#111111")
+        ax_pc.text(
+            0.5,
+            0.5,
+            f"pointcloud comparison unavailable\\n{pc_compare_error}",
+            ha="center",
+            va="center",
+            color="white",
+            fontsize=10,
+            transform=ax_pc.transAxes,
+        )
+        ax_pc.set_xticks([])
+        ax_pc.set_yticks([])
+        ax_pc.set_title("plot from pointcloud_comparison.py")
 
-    ax4 = fig.add_subplot(gs[1, 0], projection="polar")
-    draw_polar(ax4, danger_grid, valid_mask, nontrav, r_edges, theta_edges)
+    polar_mesh = draw_polar(
+        ax=ax_polar,
+        polar_grid=polar_grid,
+        r_edges=r_edges,
+        theta_edges=theta_edges,
+        title="plot from polar2cartesian.py",
+    )
 
-    ax5 = fig.add_subplot(gs[1, 1:])
-    draw_cartesian_overlay(ax5, nontrav, r_edges, theta_edges, tilt_points)
+    _, z_scatter = draw_cartesian_overlay(
+        ax=ax_cart,
+        cart_grid=cart_grid,
+        x_coords=x_coords,
+        y_coords=y_coords,
+        tilt_points=tilt_points,
+        max_points=max_points,
+        show_pc_overlay=show_pc_overlay,
+        title="plot from polar2cartesian.py",
+    )
 
-    fig.tight_layout()
+    fig.colorbar(
+        polar_mesh,
+        ax=ax_polar,
+        orientation="horizontal",
+        pad=0.18,
+        fraction=0.08,
+        label="Danger",
+    )
+    if z_scatter is not None:
+        fig.colorbar(
+            z_scatter,
+            ax=ax_cart,
+            orientation="horizontal",
+            pad=0.18,
+            fraction=0.08,
+            label="Point Z (m)",
+        )
+
+    frame_id = _frame_id_from_name(frame_path)
+    folder_name = frame_path.parent.name
+    fig.suptitle(f"frame_{frame_id:05d} from {folder_name}", fontsize=14, fontweight="bold")
+
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_path, dpi=160, bbox_inches="tight")
+    fig.savefig(out_path, dpi=160)
     plt.close(fig)
 
 
 def main() -> None:
     args = parse_args()
-    project_root = Path(__file__).resolve().parents[1]
-    _add_pipeline_module_path(project_root)
+    npz_dir = args.npz_dir.expanduser().resolve()
+    if not npz_dir.is_dir():
+        raise NotADirectoryError(f"Expected folder of NPZ files: {npz_dir}")
 
-    import run_svo_pipeline as pipeline
+    frames = sorted_frame_paths(npz_dir)
+    if not frames:
+        raise FileNotFoundError(f"No frame_*.npz files found in {npz_dir}")
 
-    svo_path = pipeline.resolve_svo_path(args.svo_path)
-    recording_name = svo_path.parent.parent.name
-    out_dir = project_root / "temp-offline-outs" / recording_name
+    single_mode = args.frame_id is not None or args.frame_pos is not None
+    if args.all:
+        selected = frames
+    else:
+        selected = _pick_frame(frames, args.frame_id, args.frame_pos)
+        if not single_mode:
+            selected = frames
 
-    config_path = (
-        args.config.expanduser().resolve()
-        if args.config is not None
-        else project_root / "config" / "pipeline_config.yaml"
-    )
-    config = pipeline.load_config(config_path)
+    if args.out is not None and len(selected) != 1:
+        raise ValueError("--out can only be used when rendering exactly one frame")
 
-    if not args.use_existing:
-        pipeline.process_svo(project_root, svo_path, config)
+    if args.out_dir:
+        out_dir = args.out_dir.expanduser().resolve()
+    else:
+        project_root = Path(__file__).resolve().parents[1]
+        out_dir = project_root / "traversability_frames" / npz_dir.name
 
-    frame_paths = sorted_frame_paths(out_dir)
-    if not frame_paths:
-        raise FileNotFoundError(
-            f"No frame_*.npz files under {out_dir}. "
-            "Check write_output flags in config (tilt_compensate and traversability)."
+    for frame_path in selected:
+        if args.out is not None:
+            out_path = args.out.expanduser().resolve()
+        else:
+            out_path = out_dir / f"{frame_path.stem}.summary.png"
+
+        render_frame(
+            frame_path=frame_path,
+            out_path=out_path,
+            xy_res=args.xy_res,
+            max_points=args.max_points,
+            pc_plane=args.pc_plane,
+            show_pc_overlay=not args.no_pc_overlay,
         )
-
-    frame_path = pick_frame(frame_paths, args.frame_id, args.frame_pos)
-    frame_id = frame_id_from_name(frame_path)
-    npz = load_npz_frame(frame_path)
-    image_rgb, raw_points = fetch_image_and_raw_points(svo_path, frame_id)
-
-    output_path = args.out
-    if output_path is None:
-        output_path = (
-            project_root
-            / "traversability_frames"
-            / recording_name
-            / "summary"
-            / f"{frame_path.stem}.png"
-        )
-
-    render_summary(
-        image_rgb=image_rgb,
-        raw_points=raw_points,
-        tilt_points=npz["tilt_points"],
-        danger_grid=npz["danger_grid"],
-        valid_mask=npz["valid_mask"],
-        nontrav=npz["nontraversable"],
-        r_edges=npz["r_edges"],
-        theta_edges=npz["theta_edges"],
-        side_plane=args.side_plane,
-        out_path=output_path,
-        max_points=args.max_points,
-    )
-
-    print(f"Wrote {output_path}")
-    print(f"Used NPZ {frame_path}")
+        print(f"Wrote {out_path}")
 
 
 if __name__ == "__main__":

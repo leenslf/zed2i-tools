@@ -4,14 +4,17 @@
 Current behavior:
 - Loads config once from config/pipeline_config.yaml
 - Reads frames from an SVO2 recording via pyzed
-- Applies tilt compensation
 - Applies voxel filtering
+- Applies tilt compensation (on voxel-filtered points)
 - Applies polarization
 - Applies traversability
 - If one or more stages have write_output enabled, writes a single NPZ file per
   frame under temp-offline-outs/<recording>/ containing only the enabled-stage
   outputs with namespaced keys (e.g. tilt_points, voxel_points, polarize_points,
   traversability_danger_grid, …) plus a shared timestamp field.
+- Optionally writes input sensor data to the same NPZ:
+  - input_points (Nx3 finite XYZ points from the raw ZED point cloud)
+  - input_image_bgra (H, W, 4 uint8 left image in BGRA order)
 - RUN: python3 src/traversability/python/run_svo_pipeline.py <PATH>
 """
 
@@ -34,6 +37,8 @@ from voxel_filter import voxel_filter
 DEFAULT_CONFIG = {
     "svo": {
         "frame_skip": 10,
+        "write_input_image_to_npz": False,
+        "write_input_pointcloud_to_npz": False,
     },
     "tilt_compensate": {
         "write_output": False,
@@ -164,6 +169,8 @@ def process_svo(project_root: Path, svo_path: Path, config: Dict[str, Any]) -> N
 
     svo_cfg = config.get("svo", {})
     frame_skip = int(svo_cfg.get("frame_skip", 10))
+    write_input_image = bool(svo_cfg.get("write_input_image_to_npz", False))
+    write_input_pointcloud = bool(svo_cfg.get("write_input_pointcloud_to_npz", False))
     tilt_cfg = config.get("tilt_compensate", {})
     write_tilt_output = bool(tilt_cfg.get("write_output", False))
     voxel_cfg = config.get("voxel_filter", {})
@@ -172,13 +179,22 @@ def process_svo(project_root: Path, svo_path: Path, config: Dict[str, Any]) -> N
     write_polarize_output = bool(polarize_cfg.get("write_output", False))
     traversability_cfg = config.get("traversability", {})
     write_traversability_output = bool(traversability_cfg.get("write_output", True))
-    any_write = write_tilt_output or write_voxel_output or write_polarize_output or write_traversability_output
+    any_write = (
+        write_tilt_output
+        or write_voxel_output
+        or write_polarize_output
+        or write_traversability_output
+        or write_input_image
+        or write_input_pointcloud
+    )
     LOGGER.info(
-        "Stage output flags: tilt=%s, voxel=%s, polarize=%s, traversability=%s — writing %s",
+        "Output flags: tilt=%s, voxel=%s, polarize=%s, traversability=%s, input_image=%s, input_pointcloud=%s — writing %s",
         write_tilt_output,
         write_voxel_output,
         write_polarize_output,
         write_traversability_output,
+        write_input_image,
+        write_input_pointcloud,
         f"single NPZ to {out_root}/" if any_write else "nothing (all in-memory)",
     )
 
@@ -187,6 +203,7 @@ def process_svo(project_root: Path, svo_path: Path, config: Dict[str, Any]) -> N
 
     zed = open_svo(svo_path)
     point_cloud = sl.Mat()
+    image = sl.Mat()
     pose = sl.Pose()
 
     processed_frames = 0
@@ -209,6 +226,8 @@ def process_svo(project_root: Path, svo_path: Path, config: Dict[str, Any]) -> N
             if frame_index % frame_skip != 0: continue
             try:
                 zed.retrieve_measure(point_cloud, sl.MEASURE.XYZ, sl.MEM.CPU)
+                if write_input_image:
+                    zed.retrieve_image(image, sl.VIEW.LEFT, sl.MEM.CPU)
                 timestamp = zed.get_timestamp(sl.TIME_REFERENCE.IMAGE).get_milliseconds()
                 zed.get_position(pose, sl.REFERENCE_FRAME.WORLD)
                 q = pose.get_orientation().get()
@@ -229,6 +248,10 @@ def process_svo(project_root: Path, svo_path: Path, config: Dict[str, Any]) -> N
 
                 if any_write:
                     frame_data: Dict[str, Any] = {"timestamp": timestamp}
+                    if write_input_pointcloud:
+                        frame_data["input_points"] = points
+                    if write_input_image:
+                        frame_data["input_image_bgra"] = image.get_data()
                     if write_tilt_output:
                         frame_data["tilt_points"] = detilted_points
                     if write_voxel_output:
