@@ -27,10 +27,10 @@ INPUT_KEYS = (
     "input_points",
 )
 TILT_KEYS = ("tilt_points",)
-PLANE_AXES: dict[str, tuple[int, int, str, str]] = {
-    "xy": (0, 1, "X (m)", "Y (m)"),
-    "xz": (0, 2, "X (m)", "Z (m)"),
-    "yz": (1, 2, "Y (m)", "Z (m)"),
+PLANE_AXES: dict[str, tuple[int, int, str, str, str]] = {
+    "xy": (0, 1, "X (m)", "Y (m)", "XY"),
+    "xz": (0, 2, "X (m)", "Z (m)", "XZ"),
+    "yz": (1, 2, "Y (m)", "Z (m)", "YZ"),
 }
 
 
@@ -197,9 +197,9 @@ def sample_points(points: np.ndarray, max_points: int) -> np.ndarray:
     return points[idx]
 
 
-def project_points(points: np.ndarray, plane: str) -> tuple[np.ndarray, np.ndarray, str, str]:
-    i, j, xlabel, ylabel = PLANE_AXES[plane]
-    return points[:, i], points[:, j], xlabel, ylabel
+def project_points(points: np.ndarray, plane: str) -> tuple[np.ndarray, np.ndarray, str, str, str]:
+    i, j, xlabel, ylabel, plane_name = PLANE_AXES[plane]
+    return points[:, i], points[:, j], xlabel, ylabel, plane_name
 
 def plot_comparison(
     ax: plt.Axes,
@@ -214,8 +214,8 @@ def plot_comparison(
 
     input_plot = sample_points(input_points, max_points)
     tilt_plot = sample_points(tilt_points, max_points)
-    input_u, input_v, xlabel, ylabel = project_points(input_plot, plane)
-    tilt_u, tilt_v, _, _ = project_points(tilt_plot, plane)
+    input_u, input_v, xlabel, ylabel, plane_name = project_points(input_plot, plane)
+    tilt_u, tilt_v, _, _, _ = project_points(tilt_plot, plane)
 
     ax.scatter(
         input_u,
@@ -234,13 +234,13 @@ def plot_comparison(
         linewidths=0,
     )
 
-    ax.set_xlim(0.2, 1.0)
-    ax.set_ylim(0.0, 1.0)
+    ax.set_xlim(-0.8, 0.9)
+    ax.set_ylim(-0.6, 0.6)
 
     ax.set_aspect("equal", adjustable="box")
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
-    ax.set_title(f"{title} ({plane.upper()})")
+    ax.set_title(f"{title} ({plane_name} plane)")
     legend_handles = [
         Line2D([0], [0], marker="o", linestyle="none", markerfacecolor=input_color, markeredgecolor=input_color, markersize=6, label=f"input"),
         Line2D([0], [0], marker="o", linestyle="none", markerfacecolor=tilt_color, markeredgecolor=tilt_color, markersize=6, label=f"tilt-compensated"),

@@ -13,8 +13,8 @@ from matplotlib.colors import Normalize
 
 
 FRAME_PATTERN = re.compile(r"^frame_(\d+)\.npz$")
-DISPLAY_X_LIM = (-1.5, 1.5)
-DISPLAY_Y_LIM = (0.0, 2.0)
+DISPLAY_X_LIM = (-0.9, 0.9)
+DISPLAY_Y_LIM = (0.0, 0.8)
 
 
 def parse_args() -> argparse.Namespace:
@@ -210,7 +210,7 @@ def draw_cartesian_overlay(
             s=2.0,
             c=pc_z,
             cmap="viridis",
-            alpha=0.8,
+            alpha=0.05,
             linewidths=0,
             label="tilt_points",
             zorder=5,

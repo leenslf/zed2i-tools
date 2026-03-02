@@ -132,6 +132,14 @@ def _frame_id_from_name(path: Path) -> int:
     return int(m.group(1))
 
 
+def _with_pc_suffix(path: Path, add_pc_suffix: bool) -> Path:
+    if not add_pc_suffix:
+        return path
+    if path.suffix:
+        return path.with_name(f"{path.stem}.pc{path.suffix}")
+    return path.with_name(f"{path.name}.pc")
+
+
 def render_frame(
     frame_path: Path,
     out_path: Path,
@@ -193,7 +201,7 @@ def render_frame(
             tilt_points=tilt_compare_points,
             max_points=max_points,
             plane=pc_plane,
-            title="plot from pointcloud_comparison.py",
+            title="original points vs tilt-compensated",
         )
     else:
         ax_pc.set_facecolor("#111111")
@@ -209,14 +217,14 @@ def render_frame(
         )
         ax_pc.set_xticks([])
         ax_pc.set_yticks([])
-        ax_pc.set_title("plot from pointcloud_comparison.py")
+        ax_pc.set_title("original points vs tilt-compensated")
 
     polar_mesh = draw_polar(
         ax=ax_polar,
         polar_grid=polar_grid,
         r_edges=r_edges,
         theta_edges=theta_edges,
-        title="plot from polar2cartesian.py",
+        title="Traversability - Polar Bin",
     )
 
     _, z_scatter = draw_cartesian_overlay(
@@ -227,7 +235,7 @@ def render_frame(
         tilt_points=tilt_points,
         max_points=max_points,
         show_pc_overlay=show_pc_overlay,
-        title="plot from polar2cartesian.py",
+        title="Traversability - Cartesian Grid",
     )
 
     fig.colorbar(
@@ -286,9 +294,14 @@ def main() -> None:
 
     for frame_path in selected:
         if args.out is not None:
-            out_path = args.out.expanduser().resolve()
+            out_path = _with_pc_suffix(
+                args.out.expanduser().resolve(), add_pc_suffix=args.no_pc_overlay
+            )
         else:
-            out_path = out_dir / f"{frame_path.stem}.summary.png"
+            out_path = _with_pc_suffix(
+                out_dir / f"{frame_path.stem}.summary.png",
+                add_pc_suffix=args.no_pc_overlay,
+            )
 
         render_frame(
             frame_path=frame_path,

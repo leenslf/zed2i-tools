@@ -5,7 +5,7 @@ svo:
   coordinate_system: RIGHT_HANDED_Z_UP_X_FWD
   # Options: PERFORMANCE, QUALITY, ULTRA, NEURAL
   depth_mode: PERFORMANCE
-  frame_skip: 3
+  frame_skip: 8
   write_input_image_to_npz: true
   write_input_pointcloud_to_npz: true
 
