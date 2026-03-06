@@ -31,7 +31,7 @@ def voxel_filter(points: np.ndarray, config: Dict[str, Any]) -> np.ndarray:
     vx = float(config.get("voxel_size_x", 0.05))
     vy = float(config.get("voxel_size_y", 0.05))
     vz = float(config.get("voxel_size_z", 0.05))
-    min_points = int(config.get("min_points_per_voxel", 8))
+    min_points = int(config.get("min_points_per_voxel", 3))
 
     if vx <= 0.0 or vy <= 0.0 or vz <= 0.0:
         raise ValueError("Voxel sizes must be positive.")
@@ -53,5 +53,7 @@ def voxel_filter(points: np.ndarray, config: Dict[str, Any]) -> np.ndarray:
         return np.empty((0, 3), dtype=np.float32)
 
     kept_voxel_indices = voxel_indices[keep_point_mask]
+    # convert integer voxel indices back into real-world XYZ coordinates, 
+    # placing each point at the geometric center of its voxel.
     centered_xyz = (kept_voxel_indices.astype(np.float32) + 0.5) * voxel_size
     return centered_xyz.astype(np.float32, copy=False)

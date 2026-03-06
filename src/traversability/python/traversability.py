@@ -52,11 +52,60 @@ def _estimate_danger_value(
     return danger_value
 
 
+def _compute_ray_cast_mask(valid_mask: np.ndarray, nontraversable: np.ndarray) -> np.ndarray:
+    """Infer line-of-sight free-space bins along each theta column.
+
+    Depth points only mark bins where returns landed, leaving NaNs between the
+    sensor and the furthest return in a column. This helper applies occupancy-grid
+    style ray casting: for each theta column, all radial bins closer than the ray
+    cast limit are marked as observed free space.
+
+    The ray cast limit is the closer of:
+      - the first non-traversable bin in the column, OR
+      - the furthest valid return (if no obstacle is present).
+
+    Stopping at the first non-traversable bin is critical: without it, a
+    beam that passes through a gap in an obstacle (e.g. a hole in a wall) would
+    cause all intermediate bins, including those behind the obstacle, to be
+    incorrectly marked as traversable free space. The obstacle itself blocks the
+    ray, so nothing beyond it can be inferred as observed.
+    """
+    if valid_mask.ndim != 2:
+        raise ValueError(f"`valid_mask` must be 2D, got shape {valid_mask.shape}")
+
+    n_r, _ = valid_mask.shape
+
+    # Furthest valid return per column — used as the limit when no obstacle is present.
+    has_hit = valid_mask.any(axis=0)
+    furthest_hit_idx = n_r - 1 - np.argmax(valid_mask[::-1], axis=0)
+    furthest_hit_idx = np.where(has_hit, furthest_hit_idx, -1)
+
+    # Closest non-traversable bin per column — this is where the ray is blocked.
+    # nontraversable only flags bins with actual returns, so phantom occlusion
+    # from NaN cells is not possible.
+    has_obstacle = nontraversable.any(axis=0)
+    closest_obstacle_idx = np.argmax(nontraversable, axis=0)
+
+    # Use the obstacle as the limit where present; fall back to furthest valid return.
+    ray_limit = np.where(has_obstacle, closest_obstacle_idx, furthest_hit_idx)
+
+    radial_idx = np.arange(n_r, dtype=np.int32)[:, None]
+    return radial_idx < ray_limit[None, :]
+
+
 def compute_traversability(
     points: np.ndarray,
     config: Dict[str, Any],
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Compute polar traversability danger grid from [r, theta, z] points."""
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Compute polar traversability outputs from [r, theta, z] points.
+
+    Returns:
+        trav_grid: float32 traversability map using sentinels:
+            NaN unknown/unobserved, 0.0 traversable observed space, 1.0 non-traversable.
+        r_edges: radial bin edges in meters.
+        theta_edges: angular bin edges in radians.
+        height_map: max-height polar map with missing bins filled by 0.0 for filtering.
+    """
     points = np.asarray(points)
     if points.ndim != 2 or points.shape[1] < 3:
         raise ValueError(f"`points` must be 2D with at least 3 columns, got {points.shape}")
@@ -66,10 +115,9 @@ def compute_traversability(
         empty_f32 = np.empty((0,), dtype=np.float32)
         return (
             np.empty((0, 0), dtype=np.float32),
-            np.empty((0, 0), dtype=bool),
-            np.empty((0, 0), dtype=bool),
             empty_f32,
             empty_f32,
+            np.empty((0, 0), dtype=np.float32),
         )
 
     danger_threshold = float(config.get("danger_threshold", 0.3))
@@ -89,10 +137,13 @@ def compute_traversability(
     theta = polar_points[:, 1]
     z = polar_points[:, 2]
 
+    # currently fixing the range, may not the be the best choice
     r_min = float(config.get("r_min_m", r.min()))
     r_max = float(config.get("r_max_m", r.max()))
     theta_min = float(np.deg2rad(config.get("theta_min_deg", float(np.degrees(theta.min())))))
     theta_max = float(np.deg2rad(config.get("theta_max_deg", float(np.degrees(theta.max())))))
+    # r_min, r_max = float(r.min()), float(r.max())
+    # theta_min, theta_max = float(theta.min()), float(theta.max())
     r_edges = np.arange(r_min, r_max + polar_grid_size_r, polar_grid_size_r, dtype=np.float32)
     theta_edges = np.arange(
         theta_min,
@@ -101,14 +152,13 @@ def compute_traversability(
         dtype=np.float32,
     )
 
-    # Match ROS callback behavior: skip if not enough bins to build a 2D map.
+    # skip if not enough bins to build a 2D map.
     if r_edges.size < 2 or theta_edges.size < 2:
         return (
             np.empty((0, 0), dtype=np.float32),
-            np.empty((0, 0), dtype=bool),
-            np.empty((0, 0), dtype=bool),
             r_edges.astype(np.float32, copy=False),
             theta_edges.astype(np.float32, copy=False),
+            np.empty((0, 0), dtype=np.float32),
         )
 
     height_map, _, _, _ = binned_statistic_2d(
@@ -133,14 +183,17 @@ def compute_traversability(
         hcrit_m=hcrit_m,
     ).astype(np.float32, copy=False)
 
-    # Critical behavior from ROS node: invalidate danger where input bins were empty.
     danger_grid[~valid_mask] = np.nan
     nontraversable = (danger_grid > danger_threshold) & valid_mask
+    ray_cast_mask = _compute_ray_cast_mask(valid_mask, nontraversable)
+    observed_mask = valid_mask | ray_cast_mask
+    trav_grid = np.full(valid_mask.shape, np.nan, dtype=np.float32)
+    trav_grid[observed_mask & ~nontraversable] = 0.0
+    trav_grid[valid_mask & (danger_grid > danger_threshold)] = 1.0
 
     return (
-        danger_grid,
-        valid_mask.astype(bool, copy=False),
-        nontraversable.astype(bool, copy=False),
+        trav_grid,
         r_edges.astype(np.float32, copy=False),
         theta_edges.astype(np.float32, copy=False),
+        height_map.astype(np.float32, copy=False),
     )

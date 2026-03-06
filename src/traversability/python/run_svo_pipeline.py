@@ -11,7 +11,7 @@ Current behavior:
 - If one or more stages have write_output enabled, writes a single NPZ file per
   frame under temp-offline-outs/<recording>/ containing only the enabled-stage
   outputs with namespaced keys (e.g. tilt_points, voxel_points, polarize_points,
-  traversability_danger_grid, …) plus a shared timestamp field.
+  traversability_trav_grid, …) plus a shared timestamp field.
 - Optionally writes input sensor data to the same NPZ:
   - input_points (Nx3 finite XYZ points from the raw ZED point cloud)
   - input_image_bgra (H, W, 4 uint8 left image in BGRA order)
@@ -241,7 +241,7 @@ def process_svo(project_root: Path, svo_path: Path, config: Dict[str, Any]) -> N
                 detilted_points = tilt_compensate(points, quaternion)
                 filtered_points = voxel_filter(detilted_points, voxel_cfg)
                 polarized_points = polarize(filtered_points, polarize_cfg)
-                danger_grid, valid_mask, nontraversable, r_edges, theta_edges = compute_traversability(
+                trav_grid, r_edges, theta_edges, height_map = compute_traversability(
                     polarized_points,
                     traversability_cfg,
                 )
@@ -259,11 +259,10 @@ def process_svo(project_root: Path, svo_path: Path, config: Dict[str, Any]) -> N
                     if write_polarize_output:
                         frame_data["polarize_points"] = polarized_points
                     if write_traversability_output:
-                        frame_data["traversability_danger_grid"] = danger_grid
-                        frame_data["traversability_valid_mask"] = valid_mask
-                        frame_data["traversability_nontraversable"] = nontraversable
+                        frame_data["traversability_trav_grid"] = trav_grid
                         frame_data["traversability_r_edges"] = r_edges
                         frame_data["traversability_theta_edges"] = theta_edges
+                        frame_data["traversability_height_map"] = height_map
                     np.savez(out_root / frame_name, **frame_data)
 
                 processed_frames += 1
