@@ -25,6 +25,20 @@ sl::DEPTH_MODE toSdkDepthMode(DepthMode mode) {
     return sl::DEPTH_MODE::QUALITY;
 }
 
+sl::RESOLUTION toSdkResolution(CameraResolution resolution) {
+    switch (resolution) {
+        case CameraResolution::Hd2k:
+            return sl::RESOLUTION::HD2K;
+        case CameraResolution::Hd1080:
+            return sl::RESOLUTION::HD1080;
+        case CameraResolution::Hd720:
+            return sl::RESOLUTION::HD720;
+        case CameraResolution::Vga:
+            return sl::RESOLUTION::VGA;
+    }
+    return sl::RESOLUTION::HD720;
+}
+
 } // namespace
 
 std::unique_ptr<IZedCamera> CameraManager::openCamera(const Config& config) {
@@ -33,6 +47,9 @@ std::unique_ptr<IZedCamera> CameraManager::openCamera(const Config& config) {
     sl::InitParameters init_params;
     init_params.depth_mode = toSdkDepthMode(config.depth_mode);
     init_params.coordinate_units = sl::UNIT::METER;
+    if (config.camera_resolution.has_value()) {
+        init_params.camera_resolution = toSdkResolution(*config.camera_resolution);
+    }
 
     if (config.serial_number.has_value()) {
         Logger::log(LogLevel::Warn,

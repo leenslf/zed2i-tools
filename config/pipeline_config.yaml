@@ -11,21 +11,18 @@ svo:
 
 tilt_compensate:
   write_output: true
-  output_dir: temp-offline-outs/tilt_compensate
 
 voxel_filter:
   voxel_size_x: 0.05
   voxel_size_y: 0.05
   voxel_size_z: 0.05
-  min_points_per_voxel: 8
+  min_points_per_voxel: 3
   write_output: false
-  output_dir: temp-offline-outs/voxel_filter
 
 polarize:
   z_threshold: 1.5
   min_range: 0.1
   write_output: false
-  output_dir: temp-offline-outs/polarize
 
 traversability:
   r_min_m: 0.3
@@ -37,6 +34,5 @@ traversability:
   rcrit_m: 0.10
   hcrit_m: 0.20
   polar_grid_size_r_m: 0.10
-  polar_grid_size_theta_deg: 1.0
+  polar_grid_size_theta_deg: 5.0
   write_output: true
-  output_dir: temp-offline-outs/traversability
