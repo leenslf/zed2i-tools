@@ -234,8 +234,12 @@ def plot_comparison(
         linewidths=0,
     )
 
-    ax.set_xlim(-0.8, 0.9)
-    ax.set_ylim(-0.6, 0.6)
+    if plane == "yz":
+        ax.set_xlim(-0.8, 0.8)
+        ax.set_ylim(-0.6, 0.6)
+    else:
+        ax.set_xlim(0.0, 2.0)
+        ax.set_ylim(-1.0, 1.0)
 
     ax.set_aspect("equal", adjustable="box")
     ax.set_xlabel(xlabel)
