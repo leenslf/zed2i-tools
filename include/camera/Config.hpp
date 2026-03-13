@@ -14,6 +14,13 @@ enum class DepthMode {
     Neural
 };
 
+enum class CameraResolution {
+    Hd2k,
+    Hd1080,
+    Hd720,
+    Vga
+};
+
 enum class ImageFormat {
     Png,
     Jpg
@@ -31,6 +38,7 @@ struct ConfigOverrides {
     std::optional<bool> enable_point_cloud;
 
     std::optional<DepthMode> depth_mode;
+    std::optional<CameraResolution> camera_resolution;
     std::optional<uint64_t> serial_number;
     std::optional<std::string> config_path;
 
@@ -53,6 +61,7 @@ struct Config {
     bool enable_point_cloud = false;
 
     DepthMode depth_mode = DepthMode::Quality;
+    std::optional<CameraResolution> camera_resolution;
 
     std::optional<uint64_t> serial_number;
 

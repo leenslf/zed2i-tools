@@ -50,6 +50,23 @@ DepthMode parseDepthMode(const std::string& value) {
     throw std::runtime_error("Unknown depth mode: " + value);
 }
 
+CameraResolution parseCameraResolution(const std::string& value) {
+    const auto upper = toLower(trim(value));
+    if (upper == "hd2k") {
+        return CameraResolution::Hd2k;
+    }
+    if (upper == "hd1080") {
+        return CameraResolution::Hd1080;
+    }
+    if (upper == "hd720") {
+        return CameraResolution::Hd720;
+    }
+    if (upper == "vga") {
+        return CameraResolution::Vga;
+    }
+    throw std::runtime_error("Unknown camera resolution: " + value);
+}
+
 ImageFormat parseImageFormat(const std::string& value) {
     const auto lower = toLower(trim(value));
     if (lower == "png") {
@@ -121,6 +138,8 @@ Config Config::fromFile(const std::string& path) {
             config.recording_keyboard_toggle = parseBool(value);
         } else if (key == "depth_mode") {
             config.depth_mode = parseDepthMode(value);
+        } else if (key == "camera_resolution") {
+            config.camera_resolution = parseCameraResolution(value);
         } else if (key == "serial_number") {
             config.serial_number = static_cast<uint64_t>(std::stoull(value));
         } else if (key == "log_level") {
@@ -185,6 +204,9 @@ ConfigOverrides ConfigOverrides::fromArgs(int argc, char** argv) {
             overrides.recording_root = arg.substr(std::string("--record-root=").size());
         } else if (arg.rfind("--depth-mode=", 0) == 0) {
             overrides.depth_mode = parseDepthMode(arg.substr(std::string("--depth-mode=").size()));
+        } else if (arg.rfind("--camera-resolution=", 0) == 0) {
+            overrides.camera_resolution =
+                parseCameraResolution(arg.substr(std::string("--camera-resolution=").size()));
         } else if (arg.rfind("--serial=", 0) == 0) {
             overrides.serial_number = static_cast<uint64_t>(
                 std::stoull(arg.substr(std::string("--serial=").size())));
@@ -233,6 +255,9 @@ void Config::applyOverrides(const ConfigOverrides& overrides) {
     }
     if (overrides.depth_mode.has_value()) {
         depth_mode = *overrides.depth_mode;
+    }
+    if (overrides.camera_resolution.has_value()) {
+        camera_resolution = *overrides.camera_resolution;
     }
     if (overrides.serial_number.has_value()) {
         serial_number = overrides.serial_number;

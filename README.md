@@ -62,9 +62,13 @@ OR
 - `--record-pointcloud-format=ply|svo`
 - `--record-root=<path>` output root folder (default `recordings`)
 - `--depth-mode=PERFORMANCE|QUALITY|ULTRA|NEURAL`
+- `--camera-resolution=HD2K|HD1080|HD720|VGA`
 - `--serial=<serial>`
 - `--iterations=<N>` run N loops, 0 for infinite (default)
 - `--sleep-ms=<N>` sleep between loops (default 5 ms)
+
+Config file note (`config/example.conf`):
+- `camera_resolution=HD2K|HD1080|HD720|VGA` (optional; if unset, SDK/default camera resolution is used)
 
 ## Tests for the camera 
 (no formal unit/ integration tests for traversability pipeline, yet)
@@ -120,7 +124,7 @@ See [pipeline config](config/pipeline_config.yaml) for tunable parameters and pi
 
 1. Record and label data 
     ```bash 
-    ./build/zed_app --record --record-duration=<no-seconds> --enable-point-cloud --record-pointcloud-format=svo
+    ./build/zed_app --record --record-duration=<no-seconds> --enable-point-cloud --record-pointcloud-format=svo --camera-resolution=HD720
     ```
 2. Run the traversability pipeline on the recorded data
     ```bash 
