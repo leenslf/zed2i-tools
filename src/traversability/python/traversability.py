@@ -5,89 +5,131 @@ from __future__ import annotations
 from typing import Any, Dict, Tuple
 
 import numpy as np
-from scipy.ndimage import generic_filter, maximum_filter, minimum_filter
+from scipy.ndimage import generic_filter
 from scipy.stats import binned_statistic_2d
 
 
 def _estimate_danger_value(
     terrain: np.ndarray,
+    r_min: float,
+    theta_min: float,
     polar_grid_size_r: float,
     polar_grid_size_theta: float,
     scrit_deg: float,
     rcrit_m: float,
     hcrit_m: float,
 ) -> np.ndarray:
-    """Mirror the ROS traversability danger computation on a polar height map."""
+    """Compute a per-cell danger score from a polar height map.
+
+    Three hazard signals are computed and combined into a weighted danger value:
+
+      danger = 0.3 * (slope / scrit) + 0.3 * (roughness / rcrit) + 0.4 * (step / hcrit)
+
+    Any signal that exceeds its threshold is clipped to inf, guaranteeing the
+    cell is classified non-traversable regardless of the other terms.
+
+    Slope
+        Finite differences of the height map in the radial (∂z/∂r) and angular
+        (∂z/∂θ) directions. The angular gradient is divided by the radial bin
+        centres to convert from z/rad to z/m — without this, slope would be
+        overestimated by a factor of r in the tangential direction, growing
+        unboundedly with range.
+
+    Roughness
+        Standard deviation of heights in a 3×3 neighborhood. Measures local
+        surface irregularity independent of overall tilt.
+
+    Step height
+        For each cell, every neighbor in a 5×5 window is tested. A neighbor
+        qualifies as a step only if the height difference exceeds hcrit AND
+        the pairwise slope (arctan2(dz, dxy)) exceeds scrit. The second
+        condition prevents gradual ramps from being mis-classified as steps.
+        Distances (dxy) are computed in true Cartesian space from the polar
+        bin centres, so cells at different radii are treated fairly. The final
+        step score scales the worst-case qualifying height by the fraction of
+        neighbors that qualified, penalising confirmed ledges while suppressing
+        isolated noise.
+    """
     scrit = np.deg2rad(scrit_deg)
 
-    # Slope: gradient computed in metric units (r in meters, theta in radians).
+    # Slope: finite differences in the radial (r) and angular (θ) directions.
+    # dzdx → ∂z/∂r [z/m]:   rate of height change per meter radially.
+    # dzdy → ∂z/∂θ [z/rad]: rate of height change per radian angularly.
     dzdx, dzdy = np.gradient(terrain, polar_grid_size_r, polar_grid_size_theta)
-    slope = np.arctan(np.sqrt(dzdx * dzdx + dzdy * dzdy))
+
+    # The true metric tangential slope is ∂z/∂(arc) = (∂z/∂θ) / r, because arc
+    # length = r·dθ. Dividing dzdy by the radial bin centres converts it from
+    # z/rad to z/m, fixing the overestimation that otherwise grows with range.
+    r_centres = r_min + (np.arange(terrain.shape[0]) + 0.5) * polar_grid_size_r
+    dzdy_metric = dzdy / r_centres[:, None]
+
+    slope = np.arctan(np.sqrt(dzdx * dzdx + dzdy_metric * dzdy_metric))
     slope[slope > scrit] = np.inf
 
     # Roughness: std deviation over 3x3 neighborhood.
     roughness = generic_filter(terrain.astype(float), np.std, size=3, mode="reflect")
     roughness[roughness > rcrit_m] = np.inf
 
-    # Step height: max absolute height difference to any neighbor in 5x5 window.
-    max_z = maximum_filter(terrain, size=5, mode="reflect")
-    min_z = minimum_filter(terrain, size=5, mode="reflect")
-    step_height = np.maximum(np.abs(terrain - max_z), np.abs(terrain - min_z))
+    # Step height: Distances are computed in true Cartesian metric space (not grid indices), so cells at different radii are treated fairly.
+    nr, nc = terrain.shape
+    t_centres = theta_min + (np.arange(nc) + 0.5) * polar_grid_size_theta
+    # r_centres already computed above for the slope fix.
+    R, T = np.meshgrid(r_centres, t_centres, indexing="ij")
+    Xgrid = R * np.cos(T)
+    Ygrid = R * np.sin(T)
 
-    # Count how many neighbors differ from center by more than hcrit.
-    n_crit = 24  # 5x5 window minus center cell
-    st_mask = np.zeros_like(terrain, dtype=int)
-    padded = np.pad(terrain, 2, mode="reflect")
-    for i in range(5):
-        for j in range(5):
-            if i == 2 and j == 2:
+    half = 2  # 5x5 window
+    n_crit = (2 * half + 1) ** 2 - 1  # 24 neighbors
+    st_mask  = np.zeros((nr, nc), dtype=int)
+    h_max    = np.zeros((nr, nc), dtype=float)
+
+    padded_z = np.pad(terrain, half, mode="reflect")
+    padded_x = np.pad(Xgrid,   half, mode="reflect")
+    padded_y = np.pad(Ygrid,   half, mode="reflect")
+
+    for i in range(2 * half + 1):
+        for j in range(2 * half + 1):
+            if i == half and j == half:
                 continue
-            shifted = padded[i : i + terrain.shape[0], j : j + terrain.shape[1]]
-            st_mask += (np.abs(terrain - shifted) > hcrit_m).astype(int)
+            shifted_z = padded_z[i : i + nr, j : j + nc]
+            shifted_x = padded_x[i : i + nr, j : j + nc]
+            shifted_y = padded_y[i : i + nr, j : j + nc]
 
-    step_height = np.minimum(step_height, step_height * st_mask / n_crit)
+            dz  = np.abs(terrain - shifted_z)
+            # True horizontal distance between the cell centres in Cartesian space.
+            dxy = np.hypot(Xgrid - shifted_x, Ygrid - shifted_y)
+
+            # Pairwise slope from centre cell to each neighbor.
+            pair_slope = np.arctan2(dz, np.where(dxy == 0, np.nan, dxy))
+
+            qualifies = (dz > hcrit_m) & (pair_slope > scrit)
+            st_mask  += qualifies.astype(int)
+            h_max     = np.maximum(h_max, np.where(qualifies, dz, 0.0))
+
+    # Weigh h_max by what fraction of the 24 neighbors confirmed the step.
+    # step_height = h_max * (st_mask / n_crit), capped at h_max.
+    # e.g. 1/24 qualifying → step_height ≈ h_max/24 (noise suppressed)
+    #      24/24 qualifying → step_height = h_max   (confirmed ledge)
+    step_height = np.minimum(h_max, h_max * st_mask / n_crit)
     step_height[step_height > hcrit_m] = np.inf
 
     danger_value = 0.3 * slope / scrit + 0.3 * roughness / rcrit_m + 0.4 * step_height / hcrit_m
     return danger_value
 
 
-def _compute_ray_cast_mask(valid_mask: np.ndarray, nontraversable: np.ndarray) -> np.ndarray:
-    """Infer line-of-sight free-space bins along each theta column.
-
-    Depth points only mark bins where returns landed, leaving NaNs between the
-    sensor and the furthest return in a column. This helper applies occupancy-grid
-    style ray casting: for each theta column, all radial bins closer than the ray
-    cast limit are marked as observed free space.
-
-    The ray cast limit is the closer of:
-      - the first non-traversable bin in the column, OR
-      - the furthest valid return (if no obstacle is present).
-
-    Stopping at the first non-traversable bin is critical: without it, a
-    beam that passes through a gap in an obstacle (e.g. a hole in a wall) would
-    cause all intermediate bins, including those behind the obstacle, to be
-    incorrectly marked as traversable free space. The obstacle itself blocks the
-    ray, so nothing beyond it can be inferred as observed.
+def _compute_ray_cast_mask(nontraversable: np.ndarray) -> np.ndarray:
+    """Return a boolean mask of cells inferred as free space via ray casting.
+    For each angular column, finds the closest non-traversable cell radially.
+    All cells between the sensor origin and that obstacle are marked True.
     """
-    if valid_mask.ndim != 2:
-        raise ValueError(f"`valid_mask` must be 2D, got shape {valid_mask.shape}")
+    n_r, _ = nontraversable.shape
 
-    n_r, _ = valid_mask.shape
-
-    # Furthest valid return per column — used as the limit when no obstacle is present.
-    has_hit = valid_mask.any(axis=0)
-    furthest_hit_idx = n_r - 1 - np.argmax(valid_mask[::-1], axis=0)
-    furthest_hit_idx = np.where(has_hit, furthest_hit_idx, -1)
-
-    # Closest non-traversable bin per column — this is where the ray is blocked.
-    # nontraversable only flags bins with actual returns, so phantom occlusion
-    # from NaN cells is not possible.
+    # Closest non-traversable bin per column 
     has_obstacle = nontraversable.any(axis=0)
     closest_obstacle_idx = np.argmax(nontraversable, axis=0)
 
     # Use the obstacle as the limit where present; fall back to furthest valid return.
-    ray_limit = np.where(has_obstacle, closest_obstacle_idx, furthest_hit_idx)
+    ray_limit = np.where(has_obstacle, closest_obstacle_idx, -1)
 
     radial_idx = np.arange(n_r, dtype=np.int32)[:, None]
     return radial_idx < ray_limit[None, :]
@@ -125,9 +167,8 @@ def compute_traversability(
     rcrit_m = float(config.get("rcrit_m", 0.10))
     hcrit_m = float(config.get("hcrit_m", 0.20))
     polar_grid_size_r = float(config.get("polar_grid_size_r_m", 0.10))
-    polar_grid_size_theta_deg = float(config.get("polar_grid_size_theta_deg", 1.0))
+    polar_grid_size_theta_deg = float(config.get("polar_grid_size_theta_deg", 5.0))
     polar_grid_size_theta = float(np.deg2rad(polar_grid_size_theta_deg))
-
     if polar_grid_size_r <= 0.0 or polar_grid_size_theta <= 0.0:
         raise ValueError("Polar grid sizes must be positive.")
     if rcrit_m <= 0.0 or hcrit_m <= 0.0:
@@ -170,23 +211,24 @@ def compute_traversability(
     )
     valid_mask = ~np.isnan(height_map)
 
-    # Preserve original algorithm: fill missing cells with 0 before local filters.
+    # fill missing cells with 0 before local filters, these will be masked out again after computing the danger grid. 
     height_map = np.asarray(height_map, dtype=np.float32)
     height_map[~valid_mask] = 0.0
 
     danger_grid = _estimate_danger_value(
         terrain=height_map,
+        r_min=r_min,
+        theta_min=theta_min,
         polar_grid_size_r=polar_grid_size_r,
         polar_grid_size_theta=polar_grid_size_theta,
         scrit_deg=scrit_deg,
         rcrit_m=rcrit_m,
         hcrit_m=hcrit_m,
     ).astype(np.float32, copy=False)
-
     danger_grid[~valid_mask] = np.nan
+
     nontraversable = (danger_grid > danger_threshold) & valid_mask
-    ray_cast_mask = _compute_ray_cast_mask(valid_mask, nontraversable)
-    observed_mask = valid_mask | ray_cast_mask
+    observed_mask = _compute_ray_cast_mask(nontraversable)
     trav_grid = np.full(valid_mask.shape, np.nan, dtype=np.float32)
     trav_grid[observed_mask & ~nontraversable] = 0.0
     trav_grid[valid_mask & (danger_grid > danger_threshold)] = 1.0

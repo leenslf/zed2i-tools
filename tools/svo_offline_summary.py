@@ -12,6 +12,7 @@ import numpy as np
 
 from pointcloud_comparison import load_clouds_from_npz, plot_comparison
 from travviz_common import (
+    draw_polar,
     frame_id_from_name,
     draw_polar_with_trav_overlay,
     load_npz_frame,
@@ -56,6 +57,12 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         default=False,
         help="Overlay non-traversable cartesian cells with height_map values (temporary/debug view).",
+    )
+    parser.add_argument(
+        "--no-polar-trav-overlay",
+        action="store_true",
+        default=False,
+        help="Show the polar panel as height_map only, without traversability overlay.",
     )
     parser.add_argument(
         "--out-dir",
@@ -164,6 +171,7 @@ def render_frame(
     pc_plane: str,
     show_pc_overlay: bool,
     show_nt_height_overlay: bool,
+    show_polar_trav_overlay: bool,
 ) -> None:
     trav_grid, r_edges, theta_edges, height_map, tilt_points = load_npz_frame(frame_path)
     height_polar_grid, status_overlay = prepare_plot_layers(height_map=height_map, trav_grid=trav_grid)
@@ -172,14 +180,25 @@ def render_frame(
     _draw_image_panel(axes[0, 0], _load_image_from_npz(frame_path))
     _draw_pointcloud_panel(axes[0, 1], frame_path, max_points=max_points, pc_plane=pc_plane)
 
-    polar_mesh = draw_polar_with_trav_overlay(
-        ax=axes[1, 0],
-        height_grid=height_polar_grid,
-        status_overlay=status_overlay,
-        r_edges=r_edges,
-        theta_edges=theta_edges,
-        title="Traversability - Polar Bin",
-    )
+    if show_polar_trav_overlay:
+        polar_mesh = draw_polar_with_trav_overlay(
+            ax=axes[1, 0],
+            height_grid=height_polar_grid,
+            status_overlay=status_overlay,
+            r_edges=r_edges,
+            theta_edges=theta_edges,
+            title="Traversability - Polar Bin",
+        )
+    else:
+        polar_mesh = draw_polar(
+            ax=axes[1, 0],
+            polar_grid=height_polar_grid,
+            r_edges=r_edges,
+            theta_edges=theta_edges,
+            title="Height Map - Polar Bin",
+        )
+    axes[1, 0].invert_xaxis()
+    axes[1, 0].xaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"{-x:.4g}"))
     fig.colorbar(
         polar_mesh,
         ax=axes[1, 0],
@@ -290,13 +309,14 @@ def render_frame(
             y_plot,
             x_plot,
             s=2.0,
-            alpha=0.4,
+            alpha=0.08,
             c="#444444",
             linewidths=0.0,
             zorder=5,
         )
 
-    ax.set_xlim(-0.75, 0.75)
+    ax.set_xlim(0.75, -0.75)
+    ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"{-x:.4g}"))
     ax.set_ylim(0.0, 2.0)
     step = float(grid_res_m*2)
     major = 6 * step
@@ -369,6 +389,7 @@ def main() -> None:
             pc_plane=args.pc_plane,
             show_pc_overlay=args.pc_overlay,
             show_nt_height_overlay=args.nt_height_overlay,
+            show_polar_trav_overlay=not args.no_polar_trav_overlay,
         )
         print(f"Wrote {out_path}")
 
