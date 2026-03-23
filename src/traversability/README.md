@@ -101,56 +101,109 @@ It takes the polar `[r, theta, z]` point cloud and produces a **2D polar danger 
 
 **Step 1 — Build a polar height map**
 
-Space is discretized into a 2D polar grid with configurable radial (`polar_grid_size_r`) and angular (`polar_grid_size_theta_deg`) bin sizes. For each `(r, theta)` bin, the **maximum Z** of all points falling in that bin is recorded. This gives a height map `H[r, theta]` in polar coordinates. Bins with no points are marked invalid and filled with 0 for the filter stage.
-Todo: document how choice of polar_grid_size_r and polar_grid_size_theta_deg affects the computation.
+Input points `[r, θ, z]` are binned into a 2D polar grid. Each cell stores the **maximum z** (height) of all points falling in that `(r, θ)` bin:
 
-Todo: document choice of  `height_map[~valid_mask] = 0.0`
-Todo: document choice of `polar_grid_size_theta_deg` and `polar_grid_size_r` and its impact.
-Todo: currently harcoding   
+$$H[i,j] = \begin{cases} \max\{z : (r, \theta, z) \in \text{bin}(i,j)\} & \text{if bin}(i,j) \text{ contains at least one point} \\ z_\text{fill} & \text{otherwise} \end{cases}$$
+
+where $z_\text{fill} = -0.3\,\text{m}$.
+Space is discretized into a 2D polar grid with configurable radial (`polar_grid_size_r`) and angular (`polar_grid_size_theta_deg`) bin sizes. For each `(r, theta)` bin, the **maximum Z** of all points falling in that bin is recorded. This gives a height map `H[r, theta]` in polar coordinates.
+
+
+**i) Choice of `polar_grid_size_theta_deg` and `polar_grid_size_r`**
+
+`polar_grid_size_r_m: 0.10` seems fine. 
+`polar_grid_size_theta_deg` however is a bit of a pickle, I can't seem to set on a value that performs well always without leaving holes in the traversability grid. Too small, the grid looks very sparse and begins to compute traversability incorrectly, too big and the grid cells appear too coarse. 
+
+**ii) *To-do: currently harcoding***
 
 ``` yaml
 r_min_m: 0.3
 r_max_m: 2.0
 theta_min_deg: -45.0
 theta_max_deg: 45.0
-```
+``` 
+Perhaps these ranges should be detected dynamically, the restriction is currently made for simplifying interpretation. 
+
+
+**iii) Fill empty NaN values with a negative number**
+
+
+
+The height values are interpreted in the tilt-compensated camera frame:
+
+- `z > 0`: point is above the camera
+- `z < 0`: point is below the camera
+- `z = 0`: point lies in the horizontal plane through the camera center
+
+Bins with no points are marked invalid. In the current Python implementation they are temporarily filled with `-0.3` before the local terrain filters are applied. The value is chosen to represent terrain somewhat below the camera plane, which is consistent with a camera mounted above the robot's contact surface. 
+
+After danger estimation, those originally invalid bins are masked back to `NaN`, but nearby valid bins may still reflect the influence of this fill value because the filters operate on local neighborhoods.
+
 **Step 2 — Compute three terrain features**
 
-Three features are derived from the height map `H`:
+Three features are derived from the height map $H$. Any feature exceeding its critical threshold is set to $\infty$, making the cell unconditionally non-traversable.
 
-- **Slope** — the gradient magnitude of H in metric units:
+**Slope** — gradient magnitude in metric units, with the angular component converted from z/rad to z/m via arc-length:
 
-  ```
-  slope = arctan(sqrt((dH/dr)² + (dH/dθ)²))
-  ```
+$$\sigma[i,j] = \arctan\!\sqrt{\left(\frac{\partial H}{\partial r}\right)^2 + \left(\frac{1}{\bar{r}_i}\frac{\partial H}{\partial \theta}\right)^2}$$
 
-  Cells where `slope > scrit_deg` are set to `inf` (immediately dangerous).
+where $\bar{r}_i = r_{\text{min}} + (i+\tfrac{1}{2})\Delta r$ is the radial bin centre. 
 
-- **Roughness** — standard deviation of H over a 3×3 neighborhood. Cells where `roughness > rcrit_m` are set to `inf`.
+$\sigma$ is clipped to $\infty$ when $\sigma > \sigma_\text{crit}$.
 
-- **Step height** — the maximum absolute height difference between a cell and any neighbor in a 5×5 window. A weighting factor scales it down by the fraction of neighbors that exceed `hcrit_m`, so isolated spikes are penalized less than wide steps. Cells where the result exceeds `hcrit_m` are set to `inf`.
+**Roughness** — standard deviation of $H$ over the $3\times3$ neighbourhood $\mathcal{N}_3$:
+
+$$\rho[i,j] = \text{std}\!\left\lbrace H[i+p,\,j+q] : (p,q)\in\mathcal{N}_3\right\rbrace$$
+
+$\rho$ is clipped to $\infty$ when $\rho > \rho_\text{crit}$.
+
+**Step height** — for each cell, every neighbour $k$ in the $5\times5$ window $\mathcal{N}_5$ is tested. Neighbour $k$ qualifies as a step if:
+
+$$\delta z_k = |H[i,j] - H_k| > h_\text{crit} \quad\text{and}\quad \arctan2(\delta z_k,\, d^\text{xy}_k) > \sigma_\text{crit}$$
+
+where $d^\text{xy}_k = \lVert(X[i,j]-X_k,\; Y[i,j]-Y_k)\rVert$ is the true Cartesian horizontal distance, with $X = r\cos\theta$, $Y = r\sin\theta$.
+
+**Why Cartesian distance?** The pairwise slope $\arctan2(\delta z_k, d^\text{xy}_k)$ is a physical angle and requires $d^\text{xy}_k$ to be a real metric distance in metres. Polar grid bins are not isometric: radial neighbours are always $\Delta r$ metres apart, but angular neighbours are $\bar{r}_i \cdot \Delta\theta$ metres apart, which grows with range. Using grid-index distance would therefore misclassify far-range ramps as steps (underestimated $d^\text{xy}$) and under-penalise near-range ledges. Converting to Cartesian first ensures the pairwise slope is range-invariant.
+
+The step score is then:
+
+$$\tau[i,j] = \max_k(\delta z_k \mid k \text{ qualifies})\cdot\frac{|\{k : k \text{ qualifies}\}|}{|\mathcal{N}_5|-1}$$
+
+This is a product of two terms: $h_\text{max} = \max_k(\delta z_k \mid k \text{ qualifies})$, the severity of the tallest confirmed step edge, and $f = |\{k : k \text{ qualifies}\}| / 24$, the fraction of neighbours that independently voted for a step. A genuine ledge produces a large $f$; a noise spike does not. The combined effect:
+
+| Qualifying neighbours | $\tau$ |
+|---|---|
+| 1 of 24 | $\approx h_\text{max}/24$ — suppressed |
+| 12 of 24 | $h_\text{max}/2$ — moderate |
+| 24 of 24 | $h_\text{max}$ — full penalty |
+
+$\tau$ is clipped to $\infty$ when $\tau > h_\text{crit}$.
 
 **Step 3 — Combine into a danger score**
 
 The three features are normalized by their critical thresholds and blended with fixed weights:
 
-```
-danger = 0.3 * (slope / scrit)  +  0.3 * (roughness / rcrit)  +  0.4 * (step_height / hcrit)
-```
+$$D[i,j] = 0.3\,\frac{\sigma}{\sigma_\text{crit}} + 0.3\,\frac{\rho}{\rho_\text{crit}} + 0.4\,\frac{\tau}{h_\text{crit}}$$
 
-The `0.4` weight on step height reflects that abrupt discontinuities are the most important obstacle signal.
+The higher weight on $\tau$ reflects that abrupt discontinuities are the most salient obstacle signal.
 
 **Step 4 — Ray cast mask**
 
-Depth points only mark bins where returns landed, leaving NaNs between the
-sensor and the furthest return in a column. This helper applies occupancy-grid
-style ray casting: for each theta bin, all radial bins closer than the furthest
-non-traversable cell return are marked observed.
+LiDAR returns only mark bins where photons landed, leaving unobserved gaps between the sensor and the furthest return in each angular column. Ray casting infers those gaps as free space using the occupancy-grid convention: a ray is free along its entire path up to the first hit.
+
+For each angular column $j$, define the obstacle horizon as the nearest non-traversable radial bin:
+
+$$R^*_j = \min\left\lbrace i : D[i,j] > d_\text{thresh}\right\rbrace$$
+
+($R^*_j = \infty$ if no non-traversable cell exists in column $j$). The free-space mask is then:
+
+$$M_\text{free}[i,j] = \mathbf{1}\!\left[i < R^*_j\right]$$
 
 **Step 5 — Mask and threshold**
 
-- Grid cells that had no input points are set to `NaN` (unknown, not dangerous) `valid_mask = ~np.isnan(height_map)`. 
-- Cells with `danger > danger_threshold` are flagged as **non-traversable**.
+The three cases are combined into the final traversability map:
+
+$$T[i,j] = \begin{cases} 1.0 & \text{if } \mathbf{1}_\text{valid}[i,j] \text{ and } D[i,j] > d_\text{thresh} \\ 0.0 & \text{if } M_\text{free}[i,j] \text{ and } D[i,j] \leq d_\text{thresh} \\ \text{NaN} & \text{otherwise (unobserved)} \end{cases}$$
 
 #### Config keys
 

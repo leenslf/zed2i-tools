@@ -211,10 +211,10 @@ def compute_traversability(
     )
     valid_mask = ~np.isnan(height_map)
 
-    # fill missing cells with 0 before local filters, these will be masked out again after computing the danger grid. 
+  
     height_map = np.asarray(height_map, dtype=np.float32)
-    height_map[~valid_mask] = 0.0
-
+    height_map[~valid_mask] = -0.3  # fill missing bins with a low value, 
+    # the value is chosen to represent terrain somewhat below the camera plane
     danger_grid = _estimate_danger_value(
         terrain=height_map,
         r_min=r_min,
@@ -225,6 +225,7 @@ def compute_traversability(
         rcrit_m=rcrit_m,
         hcrit_m=hcrit_m,
     ).astype(np.float32, copy=False)
+    # height_map[~valid_mask] = np.nan
     danger_grid[~valid_mask] = np.nan
 
     nontraversable = (danger_grid > danger_threshold) & valid_mask
