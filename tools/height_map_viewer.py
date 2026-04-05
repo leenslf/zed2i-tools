@@ -67,6 +67,12 @@ def _update(ax, cbar_ax, frame_path: Path, fig: plt.Figure) -> None:
     fig.canvas.draw_idle()
 
 
+def _set_window_title(fig: plt.Figure, title: str) -> None:
+    manager = getattr(fig.canvas, "manager", None)
+    if manager is not None and hasattr(manager, "set_window_title"):
+        manager.set_window_title(title)
+
+
 def view_single(frame_path: Path) -> None:
     fig, ax = plt.subplots(figsize=(8, 6), constrained_layout=False)
     fig.subplots_adjust(right=0.85)
@@ -91,9 +97,7 @@ def view_folder(frames: list[Path]) -> None:
 
     def refresh():
         _update(ax, cbar_ax, frames[state["idx"]], fig)
-        fig.canvas.set_window_title(
-            f"[{state['idx'] + 1}/{len(frames)}] {frames[state['idx']].name}"
-        )
+        _set_window_title(fig, f"[{state['idx'] + 1}/{len(frames)}] {frames[state['idx']].name}")
 
     def on_key(event):
         idx = state["idx"]

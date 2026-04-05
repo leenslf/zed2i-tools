@@ -283,9 +283,14 @@ def plot_comparison(
     if plane == "yz":
         ax.set_xlim(-0.8, 0.8)
         ax.set_ylim(-0.6, 0.6)
+    elif plane == "xy":
+        # Top-down map orientation: Y (lateral) on horizontal, X (forward) on vertical.
+        # Camera sits at the bottom-center (X=0, Y=0).
+        ax.set_xlim(0.0, 3.0)
+        ax.set_ylim(-1.0, 2.0)
     else:
-        ax.set_xlim(0.0, 2.0)
-        ax.set_ylim(-1.0, 1.0)
+        ax.set_xlim(0.0, 3.0)
+        ax.set_ylim(-1.5, 3.0)
 
     ax.set_aspect("equal", adjustable="box")
     ax.set_xlabel(xlabel)

@@ -67,27 +67,6 @@ CameraResolution parseCameraResolution(const std::string& value) {
     throw std::runtime_error("Unknown camera resolution: " + value);
 }
 
-ImageFormat parseImageFormat(const std::string& value) {
-    const auto lower = toLower(trim(value));
-    if (lower == "png") {
-        return ImageFormat::Png;
-    }
-    if (lower == "jpg" || lower == "jpeg") {
-        return ImageFormat::Jpg;
-    }
-    throw std::runtime_error("Unknown image format: " + value);
-}
-
-PointCloudFormat parsePointCloudFormat(const std::string& value) {
-    const auto lower = toLower(trim(value));
-    if (lower == "ply") {
-        return PointCloudFormat::Ply;
-    }
-    if (lower == "svo") {
-        return PointCloudFormat::Svo;
-    }
-    throw std::runtime_error("Unknown point cloud format: " + value);
-}
 
 } // namespace
 
@@ -124,14 +103,6 @@ Config Config::fromFile(const std::string& path) {
             config.enable_recording = parseBool(value);
         } else if (key == "recording_duration_sec") {
             config.recording_duration_sec = std::stoi(value);
-        } else if (key == "recording_frame_limit") {
-            config.recording_frame_limit = std::stoi(value);
-        } else if (key == "recording_frame_stride") {
-            config.recording_frame_stride = std::stoi(value);
-        } else if (key == "recording_image_format") {
-            config.recording_image_format = parseImageFormat(value);
-        } else if (key == "recording_point_cloud_format") {
-            config.recording_point_cloud_format = parsePointCloudFormat(value);
         } else if (key == "recording_root") {
             config.recording_root = value;
         } else if (key == "recording_keyboard_toggle") {
@@ -190,16 +161,6 @@ ConfigOverrides ConfigOverrides::fromArgs(int argc, char** argv) {
             overrides.recording_keyboard_toggle = true;
         } else if (arg.rfind("--record-duration=", 0) == 0) {
             overrides.recording_duration_sec = std::stoi(arg.substr(std::string("--record-duration=").size()));
-        } else if (arg.rfind("--record-frames=", 0) == 0) {
-            overrides.recording_frame_limit = std::stoi(arg.substr(std::string("--record-frames=").size()));
-        } else if (arg.rfind("--record-stride=", 0) == 0) {
-            overrides.recording_frame_stride = std::stoi(arg.substr(std::string("--record-stride=").size()));
-        } else if (arg.rfind("--record-image-format=", 0) == 0) {
-            overrides.recording_image_format =
-                parseImageFormat(arg.substr(std::string("--record-image-format=").size()));
-        } else if (arg.rfind("--record-pointcloud-format=", 0) == 0) {
-            overrides.recording_point_cloud_format =
-                parsePointCloudFormat(arg.substr(std::string("--record-pointcloud-format=").size()));
         } else if (arg.rfind("--record-root=", 0) == 0) {
             overrides.recording_root = arg.substr(std::string("--record-root=").size());
         } else if (arg.rfind("--depth-mode=", 0) == 0) {
@@ -234,18 +195,6 @@ void Config::applyOverrides(const ConfigOverrides& overrides) {
     }
     if (overrides.recording_duration_sec.has_value()) {
         recording_duration_sec = *overrides.recording_duration_sec;
-    }
-    if (overrides.recording_frame_limit.has_value()) {
-        recording_frame_limit = *overrides.recording_frame_limit;
-    }
-    if (overrides.recording_frame_stride.has_value()) {
-        recording_frame_stride = *overrides.recording_frame_stride;
-    }
-    if (overrides.recording_image_format.has_value()) {
-        recording_image_format = *overrides.recording_image_format;
-    }
-    if (overrides.recording_point_cloud_format.has_value()) {
-        recording_point_cloud_format = *overrides.recording_point_cloud_format;
     }
     if (overrides.recording_root.has_value()) {
         recording_root = *overrides.recording_root;

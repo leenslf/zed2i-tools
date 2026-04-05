@@ -9,6 +9,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 find_package(ZED REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(yaml-cpp REQUIRED)
+find_package(OpenCV REQUIRED)
 
 set(_zed_expected_cuda "")
 if (DEFINED ZED_CUDA_VERSION)
@@ -87,6 +88,29 @@ target_include_directories(zed_traversability_pipeline
     PRIVATE
         ${ZED_INCLUDE_DIRS}
         ${CUDA_INCLUDE_DIRS}
+)
+
+# Live traversability viewer: pipeline worker thread + OpenCV display loop.
+# pipeline_runner.cpp is compiled directly into this target because
+# PipelineRunner depends on sl::Camera, which is not part of zed_traversability_core.
+add_executable(live_trav_viewer
+    src/traversability/live_viewer_main.cpp
+    src/traversability/pipeline_runner.cpp
+)
+
+target_link_libraries(live_trav_viewer
+    PRIVATE
+        zed_traversability_core
+        ${ZED_LIBRARIES}
+        ${CUDA_LIBRARIES}
+        ${OpenCV_LIBS}
+)
+
+target_include_directories(live_trav_viewer
+    PRIVATE
+        ${ZED_INCLUDE_DIRS}
+        ${CUDA_INCLUDE_DIRS}
+        ${OpenCV_INCLUDE_DIRS}
 )
 
 enable_testing()

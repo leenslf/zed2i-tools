@@ -17,10 +17,6 @@ TEST(ConfigTest, ParsesConfigFile) {
     out << "enable_point_cloud=true\n";
     out << "enable_recording=true\n";
     out << "recording_duration_sec=12\n";
-    out << "recording_frame_limit=250\n";
-    out << "recording_frame_stride=2\n";
-    out << "recording_image_format=jpg\n";
-    out << "recording_point_cloud_format=ply\n";
     out << "recording_root=/tmp/zed_recordings\n";
     out << "recording_keyboard_toggle=true\n";
     out << "depth_mode=ULTRA\n";
@@ -34,10 +30,6 @@ TEST(ConfigTest, ParsesConfigFile) {
     EXPECT_TRUE(config.enable_point_cloud);
     EXPECT_TRUE(config.enable_recording);
     EXPECT_EQ(config.recording_duration_sec, 12);
-    EXPECT_EQ(config.recording_frame_limit, 250);
-    EXPECT_EQ(config.recording_frame_stride, 2);
-    EXPECT_EQ(config.recording_image_format, ImageFormat::Jpg);
-    EXPECT_EQ(config.recording_point_cloud_format, PointCloudFormat::Ply);
     EXPECT_EQ(config.recording_root, "/tmp/zed_recordings");
     EXPECT_TRUE(config.recording_keyboard_toggle);
     EXPECT_EQ(config.depth_mode, DepthMode::Ultra);

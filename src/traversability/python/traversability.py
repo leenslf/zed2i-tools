@@ -5,8 +5,7 @@ from __future__ import annotations
 from typing import Any, Dict, Tuple
 
 import numpy as np
-from scipy.ndimage import generic_filter
-from scipy.stats import binned_statistic_2d
+from scipy.ndimage import uniform_filter
 
 
 def _estimate_danger_value(
@@ -67,7 +66,12 @@ def _estimate_danger_value(
     slope[slope > scrit] = np.inf
 
     # Roughness: std deviation over 3x3 neighborhood.
-    roughness = generic_filter(terrain.astype(float), np.std, size=3, mode="reflect")
+    # Computed via Var(x) = E[x²] - E[x]² using uniform_filter (C implementation),
+    # avoiding the per-cell Python callback overhead of generic_filter.
+    t = terrain.astype(np.float64)
+    mean_z  = uniform_filter(t,      size=3, mode="reflect")
+    mean_z2 = uniform_filter(t ** 2, size=3, mode="reflect")
+    roughness = np.sqrt(np.maximum(mean_z2 - mean_z ** 2, 0.0))
     roughness[roughness > rcrit_m] = np.inf
 
     # Step height: Distances are computed in true Cartesian metric space (not grid indices), so cells at different radii are treated fairly.
@@ -202,14 +206,15 @@ def compute_traversability(
             np.empty((0, 0), dtype=np.float32),
         )
 
-    height_map, _, _, _ = binned_statistic_2d(
-        r,
-        theta,
-        z,
-        statistic="max",
-        bins=[r_edges, theta_edges],
-    )
-    valid_mask = ~np.isnan(height_map)
+    nr = r_edges.size - 1
+    nt = theta_edges.size - 1
+    ir = np.searchsorted(r_edges, r, side="right") - 1
+    it = np.searchsorted(theta_edges, theta, side="right") - 1
+    in_bounds = (ir >= 0) & (ir < nr) & (it >= 0) & (it < nt)
+    height_map = np.full((nr, nt), -np.inf, dtype=np.float32)
+    np.maximum.at(height_map, (ir[in_bounds], it[in_bounds]), z[in_bounds])
+    valid_mask = height_map > -np.inf
+    height_map[~valid_mask] = np.nan
 
   
     height_map = np.asarray(height_map, dtype=np.float32)

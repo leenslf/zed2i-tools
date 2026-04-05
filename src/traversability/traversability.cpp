@@ -1,6 +1,5 @@
 #include "traversability/traversability.hpp"
 
-#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <limits>
@@ -133,52 +132,10 @@ Eigen::MatrixXf std_filter_3x3_reflect(const Eigen::MatrixXf& terrain) {
     return out;
 }
 
-Eigen::MatrixXf max_filter_5x5_reflect(const Eigen::MatrixXf& terrain) {
-    const Eigen::Index rows = terrain.rows();
-    const Eigen::Index cols = terrain.cols();
-    Eigen::MatrixXf out(rows, cols);
-
-    for (Eigen::Index i = 0; i < rows; ++i) {
-        for (Eigen::Index j = 0; j < cols; ++j) {
-            float v_max = -std::numeric_limits<float>::infinity();
-            for (int di = -2; di <= 2; ++di) {
-                for (int dj = -2; dj <= 2; ++dj) {
-                    const int ri = reflect_index(static_cast<int>(i) + di, static_cast<int>(rows));
-                    const int cj = reflect_index(static_cast<int>(j) + dj, static_cast<int>(cols));
-                    v_max = std::max(v_max, terrain(ri, cj));
-                }
-            }
-            out(i, j) = v_max;
-        }
-    }
-
-    return out;
-}
-
-Eigen::MatrixXf min_filter_5x5_reflect(const Eigen::MatrixXf& terrain) {
-    const Eigen::Index rows = terrain.rows();
-    const Eigen::Index cols = terrain.cols();
-    Eigen::MatrixXf out(rows, cols);
-
-    for (Eigen::Index i = 0; i < rows; ++i) {
-        for (Eigen::Index j = 0; j < cols; ++j) {
-            float v_min = std::numeric_limits<float>::infinity();
-            for (int di = -2; di <= 2; ++di) {
-                for (int dj = -2; dj <= 2; ++dj) {
-                    const int ri = reflect_index(static_cast<int>(i) + di, static_cast<int>(rows));
-                    const int cj = reflect_index(static_cast<int>(j) + dj, static_cast<int>(cols));
-                    v_min = std::min(v_min, terrain(ri, cj));
-                }
-            }
-            out(i, j) = v_min;
-        }
-    }
-
-    return out;
-}
-
 Eigen::MatrixXf _estimate_danger_value(
     const Eigen::MatrixXf& terrain,
+    float r_min,
+    float theta_min,
     float polar_grid_size_r,
     float polar_grid_size_theta,
     float scrit_deg,
@@ -186,14 +143,24 @@ Eigen::MatrixXf _estimate_danger_value(
     float hcrit_m) {
     const float inf = std::numeric_limits<float>::infinity();
     const float scrit = scrit_deg * kPi / 180.0f;
+    const Eigen::Index nr = terrain.rows();
+    const Eigen::Index nc = terrain.cols();
+
+    // --- Slope with arc-length correction ---
+    // r_centres are used to convert dzdy from z/rad to z/m: dzdy_metric = dzdy / r.
+    Eigen::VectorXf r_centres(nr);
+    for (Eigen::Index i = 0; i < nr; ++i) {
+        r_centres(i) = r_min + (static_cast<float>(i) + 0.5f) * polar_grid_size_r;
+    }
 
     auto grads = gradient(terrain, polar_grid_size_r, polar_grid_size_theta);
-    Eigen::MatrixXf slope(terrain.rows(), terrain.cols());
-    for (Eigen::Index i = 0; i < terrain.rows(); ++i) {
-        for (Eigen::Index j = 0; j < terrain.cols(); ++j) {
+    Eigen::MatrixXf slope(nr, nc);
+    for (Eigen::Index i = 0; i < nr; ++i) {
+        for (Eigen::Index j = 0; j < nc; ++j) {
             const float dzdx = grads.first(i, j);
-            const float dzdy = grads.second(i, j);
-            float s = std::atan(std::sqrt(dzdx * dzdx + dzdy * dzdy));
+            // Arc-length correction: arc length = r*dtheta, so metric slope = dzdy / r.
+            const float dzdy_metric = grads.second(i, j) / r_centres(i);
+            float s = std::atan(std::sqrt(dzdx * dzdx + dzdy_metric * dzdy_metric));
             if (s > scrit) {
                 s = inf;
             }
@@ -201,6 +168,7 @@ Eigen::MatrixXf _estimate_danger_value(
         }
     }
 
+    // --- Roughness: std deviation over 3x3 neighborhood ---
     Eigen::MatrixXf roughness = std_filter_3x3_reflect(terrain);
     for (Eigen::Index i = 0; i < roughness.rows(); ++i) {
         for (Eigen::Index j = 0; j < roughness.cols(); ++j) {
@@ -210,53 +178,75 @@ Eigen::MatrixXf _estimate_danger_value(
         }
     }
 
-    const Eigen::MatrixXf max_z = max_filter_5x5_reflect(terrain);
-    const Eigen::MatrixXf min_z = min_filter_5x5_reflect(terrain);
-    Eigen::MatrixXf step_height(terrain.rows(), terrain.cols());
-    for (Eigen::Index i = 0; i < terrain.rows(); ++i) {
-        for (Eigen::Index j = 0; j < terrain.cols(); ++j) {
-            const float dmax = std::abs(terrain(i, j) - max_z(i, j));
-            const float dmin = std::abs(terrain(i, j) - min_z(i, j));
-            step_height(i, j) = std::max(dmax, dmin);
+    // --- Step height: Cartesian distances + pairwise slope check (5x5 window) ---
+    // Build Cartesian cell centres so distances are in true metric space, treating
+    // cells at different ranges fairly.
+    Eigen::VectorXf t_centres(nc);
+    for (Eigen::Index j = 0; j < nc; ++j) {
+        t_centres(j) = theta_min + (static_cast<float>(j) + 0.5f) * polar_grid_size_theta;
+    }
+    Eigen::MatrixXf Xgrid(nr, nc);
+    Eigen::MatrixXf Ygrid(nr, nc);
+    for (Eigen::Index i = 0; i < nr; ++i) {
+        for (Eigen::Index j = 0; j < nc; ++j) {
+            Xgrid(i, j) = r_centres(i) * std::cos(t_centres(j));
+            Ygrid(i, j) = r_centres(i) * std::sin(t_centres(j));
         }
     }
 
-    const int n_crit = 24;
-    Eigen::MatrixXi st_mask = Eigen::MatrixXi::Zero(terrain.rows(), terrain.cols());
-    for (Eigen::Index i = 0; i < terrain.rows(); ++i) {
-        for (Eigen::Index j = 0; j < terrain.cols(); ++j) {
-            const float center = terrain(i, j);
-            int count = 0;
-            for (int di = -2; di <= 2; ++di) {
-                for (int dj = -2; dj <= 2; ++dj) {
-                    if (di == 0 && dj == 0) {
+    constexpr int kHalf = 2;                                     // 5x5 window
+    constexpr int kNCrit = (2 * kHalf + 1) * (2 * kHalf + 1) - 1;  // 24 neighbors
+
+    Eigen::MatrixXi st_mask = Eigen::MatrixXi::Zero(nr, nc);
+    Eigen::MatrixXf h_max = Eigen::MatrixXf::Zero(nr, nc);
+
+    for (int di = -kHalf; di <= kHalf; ++di) {
+        for (int dj = -kHalf; dj <= kHalf; ++dj) {
+            if (di == 0 && dj == 0) {
+                continue;
+            }
+            for (Eigen::Index i = 0; i < nr; ++i) {
+                for (Eigen::Index j = 0; j < nc; ++j) {
+                    const int ri = reflect_index(static_cast<int>(i) + di, static_cast<int>(nr));
+                    const int cj = reflect_index(static_cast<int>(j) + dj, static_cast<int>(nc));
+
+                    const float dz = std::abs(terrain(i, j) - terrain(ri, cj));
+                    const float dx = Xgrid(i, j) - Xgrid(ri, cj);
+                    const float dy = Ygrid(i, j) - Ygrid(ri, cj);
+                    const float dxy = std::sqrt(dx * dx + dy * dy);
+
+                    // Mirror Python: arctan2(dz, nan) when dxy==0 → nan → does not qualify.
+                    if (dxy == 0.0f) {
                         continue;
                     }
-                    const int ri = reflect_index(static_cast<int>(i) + di, static_cast<int>(terrain.rows()));
-                    const int cj = reflect_index(static_cast<int>(j) + dj, static_cast<int>(terrain.cols()));
-                    if (std::abs(center - terrain(ri, cj)) > hcrit_m) {
-                        ++count;
+                    const float pair_slope = std::atan2(dz, dxy);
+
+                    if (dz > hcrit_m && pair_slope > scrit) {
+                        st_mask(i, j) += 1;
+                        if (dz > h_max(i, j)) {
+                            h_max(i, j) = dz;
+                        }
                     }
                 }
             }
-            st_mask(i, j) = count;
         }
     }
 
-    for (Eigen::Index i = 0; i < step_height.rows(); ++i) {
-        for (Eigen::Index j = 0; j < step_height.cols(); ++j) {
-            const float scaled = step_height(i, j) * static_cast<float>(st_mask(i, j)) /
-                                 static_cast<float>(n_crit);
-            step_height(i, j) = std::min(step_height(i, j), scaled);
+    Eigen::MatrixXf step_height(nr, nc);
+    for (Eigen::Index i = 0; i < nr; ++i) {
+        for (Eigen::Index j = 0; j < nc; ++j) {
+            const float scaled = h_max(i, j) * static_cast<float>(st_mask(i, j)) /
+                                 static_cast<float>(kNCrit);
+            step_height(i, j) = std::min(h_max(i, j), scaled);
             if (step_height(i, j) > hcrit_m) {
                 step_height(i, j) = inf;
             }
         }
     }
 
-    Eigen::MatrixXf danger_value(terrain.rows(), terrain.cols());
-    for (Eigen::Index i = 0; i < terrain.rows(); ++i) {
-        for (Eigen::Index j = 0; j < terrain.cols(); ++j) {
+    Eigen::MatrixXf danger_value(nr, nc);
+    for (Eigen::Index i = 0; i < nr; ++i) {
+        for (Eigen::Index j = 0; j < nc; ++j) {
             danger_value(i, j) =
                 0.3f * slope(i, j) / scrit +
                 0.3f * roughness(i, j) / rcrit_m +
@@ -265,6 +255,32 @@ Eigen::MatrixXf _estimate_danger_value(
     }
 
     return danger_value;
+}
+
+// For each angular column, finds the closest non-traversable cell radially.
+// All cells between the sensor origin and that obstacle are marked free space.
+Eigen::Matrix<bool, Eigen::Dynamic, Eigen::Dynamic> _compute_ray_cast_mask(
+    const Eigen::Matrix<bool, Eigen::Dynamic, Eigen::Dynamic>& nontraversable) {
+    const Eigen::Index n_r = nontraversable.rows();
+    const Eigen::Index n_c = nontraversable.cols();
+
+    Eigen::Matrix<bool, Eigen::Dynamic, Eigen::Dynamic> mask(n_r, n_c);
+    mask.setConstant(false);
+
+    for (Eigen::Index j = 0; j < n_c; ++j) {
+        int closest = -1;
+        for (Eigen::Index i = 0; i < n_r; ++i) {
+            if (nontraversable(i, j)) {
+                closest = static_cast<int>(i);
+                break;
+            }
+        }
+        for (int i = 0; i < closest; ++i) {
+            mask(i, j) = true;
+        }
+    }
+
+    return mask;
 }
 
 } // namespace
@@ -282,8 +298,7 @@ TraversabilityResult Traversability::process(const Eigen::MatrixXf& points) cons
     if (polar_points.size() == 0) {
         return TraversabilityResult{
             Eigen::MatrixXf(0, 0),
-            Eigen::Matrix<bool, Eigen::Dynamic, Eigen::Dynamic>(0, 0),
-            Eigen::Matrix<bool, Eigen::Dynamic, Eigen::Dynamic>(0, 0),
+            Eigen::MatrixXf(0, 0),
             Eigen::VectorXf(0),
             Eigen::VectorXf(0)};
     }
@@ -303,10 +318,19 @@ TraversabilityResult Traversability::process(const Eigen::MatrixXf& points) cons
         throw std::invalid_argument("`rcrit_m` and `hcrit_m` must be positive.");
     }
 
-    const float r_min = polar_points.col(0).minCoeff();
-    const float r_max = polar_points.col(0).maxCoeff();
-    const float theta_min = polar_points.col(1).minCoeff();
-    const float theta_max = polar_points.col(1).maxCoeff();
+    // Grid extent: use config bounds if provided, else derive from data.
+    const float r_min = std::isnan(config_.r_min_m)
+        ? polar_points.col(0).minCoeff()
+        : config_.r_min_m;
+    const float r_max = std::isnan(config_.r_max_m)
+        ? polar_points.col(0).maxCoeff()
+        : config_.r_max_m;
+    const float theta_min = std::isnan(config_.theta_min_deg)
+        ? polar_points.col(1).minCoeff()
+        : config_.theta_min_deg * kPi / 180.0f;
+    const float theta_max = std::isnan(config_.theta_max_deg)
+        ? polar_points.col(1).maxCoeff()
+        : config_.theta_max_deg * kPi / 180.0f;
 
     Eigen::VectorXf r_edges = arange_with_step(r_min, r_max + polar_grid_size_r, polar_grid_size_r);
     Eigen::VectorXf theta_edges = arange_with_step(
@@ -315,8 +339,7 @@ TraversabilityResult Traversability::process(const Eigen::MatrixXf& points) cons
     if (r_edges.size() < 2 || theta_edges.size() < 2) {
         return TraversabilityResult{
             Eigen::MatrixXf(0, 0),
-            Eigen::Matrix<bool, Eigen::Dynamic, Eigen::Dynamic>(0, 0),
-            Eigen::Matrix<bool, Eigen::Dynamic, Eigen::Dynamic>(0, 0),
+            Eigen::MatrixXf(0, 0),
             r_edges,
             theta_edges};
     }
@@ -325,8 +348,8 @@ TraversabilityResult Traversability::process(const Eigen::MatrixXf& points) cons
     const Eigen::Index theta_bins = theta_edges.size() - 1;
     const float nan = std::numeric_limits<float>::quiet_NaN();
 
+    // Build height map: max z per bin, NaN for unobserved bins.
     Eigen::MatrixXf height_map = Eigen::MatrixXf::Constant(r_bins, theta_bins, nan);
-
     for (Eigen::Index i = 0; i < polar_points.rows(); ++i) {
         const float r = polar_points(i, 0);
         const float theta = polar_points(i, 1);
@@ -344,6 +367,8 @@ TraversabilityResult Traversability::process(const Eigen::MatrixXf& points) cons
         }
     }
 
+    // valid_mask: true where height_map has data.
+    // terrain: height_map with missing bins filled with -0.3 (slightly below camera plane).
     Eigen::Matrix<bool, Eigen::Dynamic, Eigen::Dynamic> valid_mask(r_bins, theta_bins);
     Eigen::MatrixXf terrain = height_map;
     for (Eigen::Index i = 0; i < r_bins; ++i) {
@@ -351,13 +376,15 @@ TraversabilityResult Traversability::process(const Eigen::MatrixXf& points) cons
             const bool valid = !std::isnan(height_map(i, j));
             valid_mask(i, j) = valid;
             if (!valid) {
-                terrain(i, j) = 0.0f;
+                terrain(i, j) = -0.3f;
             }
         }
     }
 
     Eigen::MatrixXf danger_grid = _estimate_danger_value(
         terrain,
+        r_min,
+        theta_min,
         polar_grid_size_r,
         polar_grid_size_theta,
         scrit_deg,
@@ -374,12 +401,22 @@ TraversabilityResult Traversability::process(const Eigen::MatrixXf& points) cons
         }
     }
 
-    return TraversabilityResult{
-        danger_grid,
-        valid_mask,
-        nontraversable,
-        r_edges,
-        theta_edges};
+    const auto observed_mask = _compute_ray_cast_mask(nontraversable);
+
+    // trav_grid: NaN = unknown, 0 = observed & traversable, 1 = non-traversable.
+    Eigen::MatrixXf trav_grid = Eigen::MatrixXf::Constant(r_bins, theta_bins, nan);
+    for (Eigen::Index i = 0; i < r_bins; ++i) {
+        for (Eigen::Index j = 0; j < theta_bins; ++j) {
+            if (observed_mask(i, j) && !nontraversable(i, j)) {
+                trav_grid(i, j) = 0.0f;
+            }
+            if (valid_mask(i, j) && danger_grid(i, j) > danger_threshold) {
+                trav_grid(i, j) = 1.0f;
+            }
+        }
+    }
+
+    return TraversabilityResult{trav_grid, terrain, r_edges, theta_edges};
 }
 
 } // namespace traversability

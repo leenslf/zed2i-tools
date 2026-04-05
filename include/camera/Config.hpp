@@ -21,15 +21,6 @@ enum class CameraResolution {
     Vga
 };
 
-enum class ImageFormat {
-    Png,
-    Jpg
-};
-
-enum class PointCloudFormat {
-    Ply,
-    Svo
-};
 
 struct ConfigOverrides {
     std::optional<bool> enable_frames;
@@ -44,10 +35,6 @@ struct ConfigOverrides {
 
     std::optional<bool> enable_recording;
     std::optional<int> recording_duration_sec;
-    std::optional<int> recording_frame_limit;
-    std::optional<int> recording_frame_stride;
-    std::optional<ImageFormat> recording_image_format;
-    std::optional<PointCloudFormat> recording_point_cloud_format;
     std::optional<std::string> recording_root;
     std::optional<bool> recording_keyboard_toggle;
 
@@ -67,10 +54,6 @@ struct Config {
 
     bool enable_recording = false;
     int recording_duration_sec = 0;
-    int recording_frame_limit = 0;
-    int recording_frame_stride = 1;
-    ImageFormat recording_image_format = ImageFormat::Png;
-    PointCloudFormat recording_point_cloud_format = PointCloudFormat::Ply;
     std::string recording_root = "recordings";
     bool recording_keyboard_toggle = false;
 

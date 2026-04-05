@@ -35,20 +35,6 @@ void write_matrix_bin(const std::filesystem::path& path, const Eigen::MatrixXf& 
         static_cast<std::streamsize>(sizeof(float) * row_major.size()));
 }
 
-void write_mask_bin(std::ofstream& out,
-                    const Eigen::Matrix<bool, Eigen::Dynamic, Eigen::Dynamic>& mask) {
-    const std::int32_t rows = static_cast<std::int32_t>(mask.rows());
-    const std::int32_t cols = static_cast<std::int32_t>(mask.cols());
-    out.write(reinterpret_cast<const char*>(&rows), sizeof(rows));
-    out.write(reinterpret_cast<const char*>(&cols), sizeof(cols));
-
-    for (Eigen::Index i = 0; i < mask.rows(); ++i) {
-        for (Eigen::Index j = 0; j < mask.cols(); ++j) {
-            const std::uint8_t v = mask(i, j) ? 1u : 0u;
-            out.write(reinterpret_cast<const char*>(&v), sizeof(v));
-        }
-    }
-}
 
 void write_vector_bin(std::ofstream& out, const Eigen::VectorXf& vec) {
     const std::int32_t size = static_cast<std::int32_t>(vec.size());
@@ -58,6 +44,17 @@ void write_vector_bin(std::ofstream& out, const Eigen::VectorXf& vec) {
         static_cast<std::streamsize>(sizeof(float) * vec.size()));
 }
 
+void write_float_matrix_bin(std::ofstream& out, const Eigen::MatrixXf& matrix) {
+    const std::int32_t rows = static_cast<std::int32_t>(matrix.rows());
+    const std::int32_t cols = static_cast<std::int32_t>(matrix.cols());
+    Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> row_major = matrix;
+    out.write(reinterpret_cast<const char*>(&rows), sizeof(rows));
+    out.write(reinterpret_cast<const char*>(&cols), sizeof(cols));
+    out.write(
+        reinterpret_cast<const char*>(row_major.data()),
+        static_cast<std::streamsize>(sizeof(float) * row_major.size()));
+}
+
 void write_traversability_bin(const std::filesystem::path& path,
                               const TraversabilityResult& result) {
     std::ofstream out(path, std::ios::binary | std::ios::trunc);
@@ -65,19 +62,8 @@ void write_traversability_bin(const std::filesystem::path& path,
         throw std::runtime_error("Failed to open output file: " + path.string());
     }
 
-    const std::int32_t danger_rows = static_cast<std::int32_t>(result.danger_grid.rows());
-    const std::int32_t danger_cols = static_cast<std::int32_t>(result.danger_grid.cols());
-    Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> danger_row_major =
-        result.danger_grid;
-
-    out.write(reinterpret_cast<const char*>(&danger_rows), sizeof(danger_rows));
-    out.write(reinterpret_cast<const char*>(&danger_cols), sizeof(danger_cols));
-    out.write(
-        reinterpret_cast<const char*>(danger_row_major.data()),
-        static_cast<std::streamsize>(sizeof(float) * danger_row_major.size()));
-
-    write_mask_bin(out, result.valid_mask);
-    write_mask_bin(out, result.nontraversable);
+    write_float_matrix_bin(out, result.trav_grid);
+    write_float_matrix_bin(out, result.height_map);
     write_vector_bin(out, result.r_edges);
     write_vector_bin(out, result.theta_edges);
 }

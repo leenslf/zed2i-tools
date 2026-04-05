@@ -39,6 +39,11 @@ struct TraversabilityConfig {
     float hcrit_m;
     float polar_grid_size_r_m;
     float polar_grid_size_theta_deg;
+    // Grid extent bounds. NaN means derive from the point-cloud data.
+    float r_min_m;
+    float r_max_m;
+    float theta_min_deg;
+    float theta_max_deg;
     bool write_output;
     std::string output_dir;
 };

@@ -7,9 +7,8 @@
 namespace traversability {
 
 struct TraversabilityResult {
-    Eigen::MatrixXf danger_grid;
-    Eigen::Matrix<bool, Eigen::Dynamic, Eigen::Dynamic> valid_mask;
-    Eigen::Matrix<bool, Eigen::Dynamic, Eigen::Dynamic> nontraversable;
+    Eigen::MatrixXf trav_grid;   // NaN = unknown, 0 = traversable, 1 = non-traversable
+    Eigen::MatrixXf height_map;  // max-height per bin; unobserved bins filled with -0.3
     Eigen::VectorXf r_edges;
     Eigen::VectorXf theta_edges;
 };

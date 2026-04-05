@@ -1,5 +1,6 @@
 #include "traversability/config.hpp"
 
+#include <limits>
 #include <stdexcept>
 
 #include <yaml-cpp/yaml.h>
@@ -49,6 +50,11 @@ PipelineConfig load_config(const std::string& path) {
         root["traversability"]["polar_grid_size_r_m"].as<float>(0.10f);
     cfg.traversability.polar_grid_size_theta_deg =
         root["traversability"]["polar_grid_size_theta_deg"].as<float>(1.0f);
+    const float kNaN = std::numeric_limits<float>::quiet_NaN();
+    cfg.traversability.r_min_m = root["traversability"]["r_min_m"].as<float>(kNaN);
+    cfg.traversability.r_max_m = root["traversability"]["r_max_m"].as<float>(kNaN);
+    cfg.traversability.theta_min_deg = root["traversability"]["theta_min_deg"].as<float>(kNaN);
+    cfg.traversability.theta_max_deg = root["traversability"]["theta_max_deg"].as<float>(kNaN);
     cfg.traversability.write_output = root["traversability"]["write_output"].as<bool>(true);
     cfg.traversability.output_dir =
         root["traversability"]["output_dir"].as<std::string>("temp-offline-outs/traversability");
